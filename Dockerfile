@@ -14,7 +14,7 @@ ENV PIP_PROXY=${HTTP_PROXY}
 WORKDIR /app
 
 COPY ./requirements.txt ./
-RUN pip config set global.proxy "$PIP_PROXY"
+RUN pip config set global.proxy $PIP_PROXY
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./greycode_core ./
