@@ -2,3 +2,4 @@ fastapi
 uvicorn
 redis[asyncio]
 httpx
+jinja2
