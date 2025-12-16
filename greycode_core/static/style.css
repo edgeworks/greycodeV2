@@ -1,0 +1,10 @@
+body { font-family: sans-serif; margin: 20px; }
+header { margin-bottom: 20px; }
+
+.GREEN { background-color: #e6ffe6; }
+.GREY  { background-color: #f0f0f0; }
+.RED   { background-color: #ffe6e6; }
+
+th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; }
+
+a { text-decoration: none; }

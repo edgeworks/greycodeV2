@@ -4,6 +4,12 @@ import redis.asyncio as redis
 import uuid
 import datetime
 from typing import Optional
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
+from fastapi import Request
+
+
+templates = Jinja2Templates(directory="templates")
 
 app = FastAPI(title="Greycode API")
 
@@ -106,3 +112,37 @@ async def list_hashes(
         "count": len(results),
         "results": results,
     }
+
+
+@app.get("/ui", response_class=HTMLResponse)
+async def ui_index(request: Request):
+    keys = await r.keys("greycode:sha256:*")
+    rows = []
+
+    for key in keys:
+        data = await r.hgetall(key)
+        rows.append({
+            "sha256": key.split(":")[-1],
+            "status": data.get("status"),
+            "computer": data.get("computer"),
+            "image": data.get("image"),
+        })
+
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "rows": rows},
+    )
+
+
+@app.get("/ui/hash/{sha256}", response_class=HTMLResponse)
+async def ui_hash_detail(request: Request, sha256: str):
+    key = f"greycode:sha256:{sha256}"
+    data = await r.hgetall(key)
+
+    if not data:
+        return HTMLResponse("<h1>Hash not found</h1>", status_code=404)
+
+    return templates.TemplateResponse(
+        "hash_detail.html",
+        {"request": request, "sha256": sha256, "data": data},
+    )

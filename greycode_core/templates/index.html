@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<table>
+  <tr>
+    <th>Status</th>
+    <th>Computer</th>
+    <th>Image</th>
+    <th>SHA256</th>
+  </tr>
+  {% for row in rows %}
+  <tr class="{{ row.status }}">
+    <td>{{ row.status }}</td>
+    <td>{{ row.computer }}</td>
+    <td>{{ row.image }}</td>
+    <td><a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

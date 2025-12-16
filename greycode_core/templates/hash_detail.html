@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Hash Details</h2>
+<ul>
+  <li><b>SHA256:</b> {{ sha256 }}</li>
+  <li><b>Status:</b> {{ data.status }}</li>
+  <li><b>Source:</b> {{ data.source }}</li>
+  <li><b>Computer:</b> {{ data.computer }}</li>
+  <li><b>Image:</b> {{ data.image }}</li>
+  <li><b>First Seen:</b> {{ data.first_seen }}</li>
+</ul>
+<a href="/ui">Back</a>
+{% endblock %}
