@@ -50,6 +50,7 @@ curl -X POST http://localhost:8000/enrich/process \
     "image": "C:\\Users\\alice\\Downloads\\invoice.exe"
   }'
 ```
+There is also a bulk_import script
 
 Response:
 ```json
