@@ -43,8 +43,12 @@ docker-compose up --build
 
 ```bash
 curl -X POST http://localhost:8000/enrich/process \
-     -H 'Content-Type: application/json' \
-     -d '{"sha256": "abc123...", "user": "DOMAIN\\user"}'
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sha256": "275a021bbfb6489e54d471899f7db9d1ae5ebf1b4c90beec59d839be1316a9ee",
+    "computer": "WS-001",
+    "image": "C:\\Users\\alice\\Downloads\\invoice.exe"
+  }'
 ```
 
 Response:
