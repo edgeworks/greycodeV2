@@ -1,12 +1,14 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, ValidationError
 import redis.asyncio as redis
 import uuid
 import datetime
+import json
 from typing import Optional
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
-from fastapi import Request
+
 
 
 templates = Jinja2Templates(directory="templates")
@@ -58,6 +60,87 @@ async def enrich_process(event: ProcessEvent):
         "image": event.image,
     }
 
+@app.post("/enrich/process/bulk")
+async def enrich_process_bulk(request: Request):
+    """
+    Accept either:
+      - application/x-ndjson (one JSON object per line)
+      - application/json with a JSON array: [ {...}, {...} ]
+      - application/json with a single object (also accepted)
+    """
+    ctype = (request.headers.get("content-type") or "").lower()
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace").strip()
+
+    if not body_text:
+        raise HTTPException(status_code=400, detail="Empty request body")
+
+    events = []
+
+    # NDJSON: one JSON object per line
+    if "application/x-ndjson" in ctype:
+        for line in body_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid NDJSON line: {e}")
+
+    else:
+        # application/json: could be object or array
+        try:
+            parsed = json.loads(body_text)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+        if isinstance(parsed, list):
+            events = parsed
+        elif isinstance(parsed, dict):
+            events = [parsed]
+        else:
+            raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
+
+    accepted = 0
+    rejected = 0
+    errors = []
+
+    for idx, obj in enumerate(events):
+        try:
+            event = ProcessEvent.model_validate(obj)  # Pydantic v2
+        except ValidationError as e:
+            rejected += 1
+            errors.append({"index": idx, "error": e.errors()})
+            continue
+
+        # Reuse the same logic as /enrich/process
+        key = f"greycode:sha256:{event.sha256}"
+        rep = await r.hgetall(key)
+        if not rep:
+            await r.hset(
+                key,
+                mapping={
+                    "status": "GREY",
+                    "source": "pending",
+                    "first_seen": datetime.datetime.utcnow().isoformat(),
+                    "computer": event.computer,
+                    "image": event.image,
+                    "uuid": str(uuid.uuid4()),
+                },
+            )
+            await r.lpush("greycode:queue:vt", event.sha256)
+
+        accepted += 1
+
+    return JSONResponse(
+        {
+            "received": len(events),
+            "accepted": accepted,
+            "rejected": rejected,
+            "errors": errors[:20],  # cap error list for safety
+        }
+    )
 
 @app.get("/status/{sha256}")
 async def get_status(sha256: str):
