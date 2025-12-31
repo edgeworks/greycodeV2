@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from pydantic import BaseModel, ValidationError
 import redis.asyncio as redis
 import uuid
@@ -13,6 +15,8 @@ from typing import Optional
 
 
 app = FastAPI(title="Greycode API")
+BASE_DIR = Path(__file__).resolve().parent
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
