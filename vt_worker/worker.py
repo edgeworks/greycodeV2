@@ -40,17 +40,27 @@ async def query_virustotal(sha256):
 
 async def main():
     while True:
-        sha256 = await r.rpop("greycode:queue:vt")
+        # Block up to 5 seconds waiting for work
+        item = await r.brpop("greycode:queue:vt", timeout=5)
+
+        if not item:
+            # Queue empty
+            continue
+
+        _, sha256 = item  # (key, value)
+
+        if not sha256:
+            continue
+
         if not vt_enabled():
-            # Stage the hash for later selection instead of calling VT
-            # # Use a SET to dedupe automatically.
+            # Training mode: do not call VT, but do not lose candidates
             await r.sadd("greycode:staged:vt_candidates", sha256)
             continue
-        if sha256:
-            await query_virustotal(sha256)
-            await asyncio.sleep(60 / RATE_LIMIT)
-        else:
-            await asyncio.sleep(5)
+
+        # Enrichment mode
+        await query_virustotal(sha256)
+        await asyncio.sleep(60 / RATE_LIMIT)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
