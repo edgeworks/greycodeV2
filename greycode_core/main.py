@@ -12,11 +12,19 @@ from typing import Optional
 
 
 
-templates = Jinja2Templates(directory="templates")
-
 app = FastAPI(title="Greycode API")
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
+
+templates = Jinja2Templates(directory="templates")
+
+async def get_ui_metrics():
+    vt_queue_len = await r.llen("greycode:queue:vt")
+    staged_candidates = await r.scard("greycode:staged:vt_candidates")
+    return {
+        "vt_queue_len": vt_queue_len,
+        "staged_candidates": staged_candidates
+    }
 
 def vt_enabled() -> bool:
     return os.getenv("VT_ENABLED", "0") == "1"
@@ -219,7 +227,8 @@ async def ui_index(request: Request):
     keys = await r.keys("greycode:sha256:*")
     rows = []
     total_hashes = len(keys)
-    
+    metrics = await get_ui_metrics()
+
     for key in keys:
         data = await r.hgetall(key)
         rows.append({
@@ -235,7 +244,13 @@ async def ui_index(request: Request):
 
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "rows": rows, "vt_enabled": vt_enabled(), "total_hashes": total_hashes},
+        {
+            "request": request, 
+            "rows": rows, 
+            "vt_enabled": vt_enabled(), 
+            "total_hashes": total_hashes,
+            **metrics
+        },
     )
 
 
@@ -243,11 +258,17 @@ async def ui_index(request: Request):
 async def ui_hash_detail(request: Request, sha256: str):
     key = f"greycode:sha256:{sha256}"
     data = await r.hgetall(key)
+    metrics = await get_ui_metrics()
 
     if not data:
         return HTMLResponse("<h1>Hash not found</h1>", status_code=404)
 
     return templates.TemplateResponse(
         "hash_detail.html",
-        {"request": request, "sha256": sha256, "data": data},
+        {
+            "request": request, 
+            "sha256": sha256, 
+            "data": data, 
+            **metrics
+        },
     )
