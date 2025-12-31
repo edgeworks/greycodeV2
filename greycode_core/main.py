@@ -7,6 +7,7 @@ import redis.asyncio as redis
 import uuid
 import datetime
 import json
+import os
 from typing import Optional
 
 
@@ -17,6 +18,8 @@ app = FastAPI(title="Greycode API")
 
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
+def vt_enabled() -> bool:
+    return os.getenv("VT_ENABLED", "0") == "1"
 
 class ProcessEvent(BaseModel):
     sha256: str
@@ -28,8 +31,11 @@ class ProcessEvent(BaseModel):
 async def enrich_process(event: ProcessEvent):
     key = f"greycode:sha256:{event.sha256}"
     rep = await r.hgetall(key)
+    now = datetime.datetime.utcnow().isoformat()
 
     if rep:
+        await r.hincrby(key, "count_total", 1)
+        await r.hset(key, mapping={"last_seen": now})
         return {
             "sha256": event.sha256,
             "status": rep.get("status"),
@@ -43,14 +49,17 @@ async def enrich_process(event: ProcessEvent):
         mapping={
             "status": "GREY",
             "source": "pending",
-            "first_seen": datetime.datetime.utcnow().isoformat(),
+            "first_seen": now,
+            "last_seen": now,
             "computer": event.computer,
             "image": event.image,
+            "count_total": "1",
             "uuid": str(uuid.uuid4()),
         },
     )
 
-    await r.lpush("greycode:queue:vt", event.sha256)
+    if vt_enabled():
+        await r.lpush("greycode:queue:vt", event.sha256)
 
     return {
         "sha256": event.sha256,
@@ -117,18 +126,26 @@ async def enrich_process_bulk(request: Request):
         # Reuse the same logic as /enrich/process
         key = f"greycode:sha256:{event.sha256}"
         rep = await r.hgetall(key)
-        if not rep:
+        now = datetime.datetime.utcnow().isoformat()
+        if rep:
+            await r.hincrby(key, "count_total", 1)
+            await r.hset(key, mapping={"last_seen": now})
+        else:
             await r.hset(
                 key,
                 mapping={
                     "status": "GREY",
                     "source": "pending",
-                    "first_seen": datetime.datetime.utcnow().isoformat(),
+                    "first_seen": now,
+                    "last_seen": now,
                     "computer": event.computer,
                     "image": event.image,
+                    "count_total": "1",
                     "uuid": str(uuid.uuid4()),
                 },
             )
+
+        if vt_enabled() and not rep:
             await r.lpush("greycode:queue:vt", event.sha256)
 
         accepted += 1
@@ -213,7 +230,7 @@ async def ui_index(request: Request):
 
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "rows": rows},
+        {"request": request, "rows": rows, "vt_enabled": vt_enabled()},
     )
 
 

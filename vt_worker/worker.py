@@ -12,6 +12,9 @@ r = redis.Redis(host="redis", port=6379, decode_responses=True)
 
 RATE_LIMIT = 3  # VirusTotal free tier: 3 requests per minute
 
+def vt_enabled() -> bool:
+    return os.getenv("VT_ENABLED", "0") == "1"
+
 async def query_virustotal(sha256):
     headers = {"x-apikey": VT_API_KEY}
     url = VT_URL.format(sha256)
@@ -38,6 +41,11 @@ async def query_virustotal(sha256):
 async def main():
     while True:
         sha256 = await r.rpop("greycode:queue:vt")
+        if not vt_enabled():
+            # Stage the hash for later selection instead of calling VT
+            # # Use a SET to dedupe automatically.
+            await r.sadd("greycode:staged:vt_candidates", sha256)
+            continue
         if sha256:
             await query_virustotal(sha256)
             await asyncio.sleep(60 / RATE_LIMIT)

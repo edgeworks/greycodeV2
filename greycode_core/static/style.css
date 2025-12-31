@@ -8,3 +8,7 @@ header { margin-bottom: 20px; }
 th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; }
 
 a { text-decoration: none; }
+
+.banner { padding: 8px 12px; border-radius: 6px; margin: 10px 0 20px; }
+.banner.enabled { background: #e6ffe6; border: 1px solid #7fd27f; }
+.banner.disabled { background: #fff3cd; border: 1px solid #e0c36a; }
