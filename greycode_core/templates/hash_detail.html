@@ -5,9 +5,17 @@
   <li><b>SHA256:</b> {{ sha256 }}</li>
   <li><b>Status:</b> {{ data.status }}</li>
   <li><b>Source:</b> {{ data.source }}</li>
-  <li><b>Computer:</b> {{ data.computer }}</li>
-  <li><b>Image:</b> {{ data.image }}</li>
-  <li><b>First Seen:</b> {{ data.first_seen }}</li>
+
+  <li><b>Count (total):</b> {{ data.count_total or "0" }}</li>
+  <li><b>First Seen:</b> {{ data.first_seen or "-" }}</li>
+  <li><b>Last Seen:</b> {{ data.last_seen or "-" }}</li>
+
+  <li><b>Computer (first seen):</b> {{ data.computer or "-" }}</li>
+  <li><b>Image (first seen):</b> <span class="mono">{{ data.image or "-" }}</span></li>
+
+  {% if data.uuid %}
+  <li><b>UUID:</b> <span class="mono">{{ data.uuid }}</span></li>
+  {% endif %}
 </ul>
 <a href="/ui">Back</a>
 {% endblock %}

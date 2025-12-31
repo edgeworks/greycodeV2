@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+<p><b>Known hashes:</b> {{ total_hashes }}</p>
 <table>
   <tr>
     <th>Status</th>
+    <th>Count</th>
+    <th>Last Seen</th>
     <th>Computer</th>
     <th>Image</th>
     <th>SHA256</th>
@@ -10,6 +13,8 @@
   {% for row in rows %}
   <tr class="{{ row.status }}">
     <td>{{ row.status }}</td>
+    <td class="num">{{ row.count_total }}</td>
+    <td class="mono">{{ row.last_seen or "-" }}</td>
     <td>{{ row.computer }}</td>
     <td>{{ row.image }}</td>
     <td><a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a></td>

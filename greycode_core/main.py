@@ -218,7 +218,8 @@ async def list_hashes(
 async def ui_index(request: Request):
     keys = await r.keys("greycode:sha256:*")
     rows = []
-
+    total_hashes = len(keys)
+    
     for key in keys:
         data = await r.hgetall(key)
         rows.append({
@@ -226,11 +227,15 @@ async def ui_index(request: Request):
             "status": data.get("status"),
             "computer": data.get("computer"),
             "image": data.get("image"),
+            "count_total": int(data.get("count_total") or 0),
+            "last_seen": data.get("last_seen"),
+            "first_seen": data.get("first_seen"),
         })
+        rows.sort(key=lambda x: x["count_total"])
 
     return templates.TemplateResponse(
         "index.html",
-        {"request": request, "rows": rows, "vt_enabled": vt_enabled()},
+        {"request": request, "rows": rows, "vt_enabled": vt_enabled(), "total_hashes": total_hashes},
     )
 
 
