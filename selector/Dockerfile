@@ -1,8 +1,10 @@
 FROM python:3.12-slim
 
-WORKDIR /app
-COPY requirements.txt /app/requirements.txt
+ARG PIP_PROXY
 
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
 RUN if [ -n "$PIP_PROXY" ]; then \
         pip config set global.proxy "$PIP_PROXY" ; \
     fi
