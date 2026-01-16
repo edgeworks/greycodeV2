@@ -19,3 +19,8 @@ a { text-decoration: none; }
 
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0 15px; align-items: end; }
+.controls label { display: flex; flex-direction: column; font-size: 0.9rem; }
+.controls input, .controls select { padding: 6px 8px; }
+.pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; }

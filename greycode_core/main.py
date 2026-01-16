@@ -3,6 +3,7 @@ from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi import Query
 from pathlib import Path
 from pydantic import BaseModel, ValidationError
 import redis.asyncio as redis
@@ -227,35 +228,94 @@ async def list_hashes(
 
 
 @app.get("/ui", response_class=HTMLResponse)
-async def ui_index(request: Request):
-    keys = await r.keys("greycode:sha256:*")
+async def ui_index(
+    request: Request,
+    status: str = Query("ALL"),
+    q: str = Query(""),
+    sort: str = Query("last_seen"),
+    order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=10, le=2000),
+):
+    # 1) Pull keys
     rows = []
-    total_hashes = len(keys)
-    metrics = await get_ui_metrics()
+    cursor = 0
+    pattern = "greycode:sha256:*"
+    q_lower = q.strip().lower()
+    total_hashes = 0
 
-    for key in keys:
-        data = await r.hgetall(key)
-        rows.append({
-            "sha256": key.split(":")[-1],
-            "status": data.get("status"),
-            "computer": data.get("computer"),
-            "image": data.get("image"),
-            "count_total": int(data.get("count_total") or 0),
-            "last_seen": data.get("last_seen"),
-            "first_seen": data.get("first_seen"),
-        })
-        rows.sort(key=lambda x: x["count_total"])
+    while True:
+        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
+        for key in keys:
+            total_hashes += 1
+            sha = key.split(":")[-1]
+            data = await r.hgetall(key)
+
+            row = {
+                "sha256": sha,
+                "status": (data.get("status") or "GREY").upper(),
+                "computer": data.get("computer") or "",
+                "image": data.get("image") or "",
+                "count_total": int(data.get("count_total") or 0),
+                "first_seen": data.get("first_seen") or "",
+                "last_seen": data.get("last_seen") or "",
+                "source": data.get("source") or "",
+            }
+
+            # 2) Apply filters
+            if status != "ALL" and row["status"] != status:
+                continue
+
+            if q_lower:
+                hay = f'{row["sha256"]} {row["computer"]} {row["image"]}'.lower()
+                if q_lower not in hay:
+                    continue
+
+            rows.append(row)
+
+        if cursor == 0:
+            break
+
+    # 3) Sort
+    reverse = (order.lower() != "asc")
+
+    if sort == "count_total":
+        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
+    elif sort == "status":
+        # Custom status ordering (RED first is usually helpful)
+        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
+        rows.sort(key=lambda x: (rank.get(x["status"], 99), x["last_seen"]), reverse=False)
+        if reverse:
+            rows.reverse()
+    else:
+        # default: last_seen
+        rows.sort(key=lambda x: x["last_seen"], reverse=reverse)
+
+    # 4) Pagination
+    total = len(rows)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_rows = rows[start:end]
 
     return templates.TemplateResponse(
         "index.html",
         {
-            "request": request, 
-            "rows": rows, 
-            "vt_enabled": vt_enabled(), 
+            "request": request,
+            "rows": page_rows,
+            "total": total,
             "total_hashes": total_hashes,
-            **metrics
+            "page": page,
+            "page_size": page_size,
+            "status": status,
+            "q": q,
+            "sort": sort,
+            "order": order,
+            "vt_enabled": vt_enabled(),
+            # if you already have metrics:
+            **(await get_ui_metrics()),
         },
     )
+
 
 
 @app.get("/ui/hash/{sha256}", response_class=HTMLResponse)

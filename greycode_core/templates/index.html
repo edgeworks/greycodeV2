@@ -1,6 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
+
 <p><b>Known hashes:</b> {{ total_hashes }}</p>
+
+<form method="get" class="controls">
+  <label>Status:
+    <select name="status">
+      {% for s in ["ALL","RED","ERROR","GREY","GREEN"] %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Search:
+    <input type="text" name="q" value="{{ q }}" placeholder="sha256 / computer / path">
+  </label>
+
+  <label>Sort:
+    <select name="sort">
+      <option value="last_seen" {% if sort=="last_seen" %}selected{% endif %}>Last seen</option>
+      <option value="count_total" {% if sort=="count_total" %}selected{% endif %}>Count</option>
+      <option value="status" {% if sort=="status" %}selected{% endif %}>Status</option>
+    </select>
+  </label>
+
+  <label>Order:
+    <select name="order">
+      <option value="desc" {% if order=="desc" %}selected{% endif %}>Desc</option>
+      <option value="asc" {% if order=="asc" %}selected{% endif %}>Asc</option>
+    </select>
+  </label>
+
+  <label>Page size:
+    <select name="page_size">
+      {% for ps in [50,100,200,500,1000] %}
+        <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <!-- reset to first page on new filter -->
+  <input type="hidden" name="page" value="1">
+
+  <button type="submit">Apply</button>
+</form>
+
+<p><b>Results:</b> {{ total }} (showing {{ rows|length }})</p>
+
 <table>
   <tr>
     <th>Status</th>
@@ -15,10 +61,29 @@
     <td>{{ row.status }}</td>
     <td class="num">{{ row.count_total }}</td>
     <td class="mono">{{ row.last_seen or "-" }}</td>
-    <td>{{ row.computer }}</td>
-    <td>{{ row.image }}</td>
-    <td><a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a></td>
+    <td>{{ row.computer or "-" }}</td>
+    <td class="mono">{{ row.image or "-" }}</td>
+    <td>
+      <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a>
+    </td>
   </tr>
   {% endfor %}
 </table>
+
+<div class="pager">
+  {% if page > 1 %}
+    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}">
+      Prev
+    </a>
+  {% endif %}
+
+  <span>Page {{ page }}</span>
+
+  {% if page * page_size < total %}
+    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}">
+      Next
+    </a>
+  {% endif %}
+</div>
+
 {% endblock %}
