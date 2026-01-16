@@ -50,6 +50,7 @@
 <table>
   <tr>
     <th>Status</th>
+    <th>VT</th>
     <th>Count</th>
     <th>Last Seen</th>
     <th>Computer</th>
@@ -59,6 +60,7 @@
   {% for row in rows %}
   <tr class="{{ row.status }}">
     <td>{{ row.status }}</td>
+    <td class="num">{{ row.vt_malicious }}</td>
     <td class="num">{{ row.count_total }}</td>
     <td class="mono">{{ row.last_seen or "-" }}</td>
     <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>

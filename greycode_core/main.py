@@ -254,6 +254,7 @@ async def ui_index(
             row = {
                 "sha256": sha,
                 "status": (data.get("status") or "GREY").upper(),
+                "vt_malicious": int(data.get("vt_malicious") or 0),
                 "computer": data.get("computer") or "",
                 "image": data.get("image") or "",
                 "count_total": int(data.get("count_total") or 0),

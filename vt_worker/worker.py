@@ -15,28 +15,61 @@ RATE_LIMIT = 3  # VirusTotal free tier: 3 requests per minute
 def vt_enabled() -> bool:
     return os.getenv("VT_ENABLED", "0") == "1"
 
-async def query_virustotal(sha256):
+import time
+
+async def query_virustotal(sha256: str):
     headers = {"x-apikey": VT_API_KEY}
     url = VT_URL.format(sha256)
-    async with httpx.AsyncClient() as client:
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(url, headers=headers)
-        if resp.status_code == 200:
-            data = resp.json()
-            stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
-            malicious = stats.get("malicious", 0)
-            source = "vt"
-            status = "RED" if malicious > 0 else "GREEN"
-            await r.hset(f"greycode:sha256:{sha256}", mapping={
+
+    now = time.time()
+    key = f"greycode:sha256:{sha256}"
+
+    if resp.status_code == 200:
+        data = resp.json()
+        attrs = data.get("data", {}).get("attributes", {}) or {}
+        stats = attrs.get("last_analysis_stats", {}) or {}
+
+        malicious = int(stats.get("malicious", 0) or 0)
+        suspicious = int(stats.get("suspicious", 0) or 0)
+
+        status = "RED" if malicious > 0 else "GREEN"
+
+        await r.hset(
+            key,
+            mapping={
                 "status": status,
-                "source": source,
-                "last_checked": time.time()
-            })
-        else:
-            await r.hset(f"greycode:sha256:{sha256}", mapping={
-                "status": "ERROR",
                 "source": "vt",
-                "last_checked": time.time()
-            })
+                "vt_malicious": str(malicious),
+                "vt_suspicious": str(suspicious),
+                "vt_last_checked": str(now),
+            },
+        )
+        return
+
+    if resp.status_code == 404:
+        await r.hset(
+            key,
+            mapping={
+                "status": "GREY",
+                "source": "vt_not_found",
+                "vt_last_checked": str(now),
+            },
+        )
+        return
+
+    # Rate limits and transient failures
+    await r.hset(
+        key,
+        mapping={
+            "status": "ERROR",
+            "source": f"vt_http_{resp.status_code}",
+            "vt_last_checked": str(now),
+        },
+    )
+
 
 async def main():
     while True:
