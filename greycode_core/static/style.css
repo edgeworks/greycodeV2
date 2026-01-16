@@ -5,7 +5,19 @@ header { margin-bottom: 20px; }
 .GREY  { background-color: #f0f0f0; }
 .RED   { background-color: #ffe6e6; }
 
-th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; vertical-align: top; }
+
+td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+td[title] { cursor: help; }
+
+th:nth-child(1), td:nth-child(1) { width: 80px; }   /* Status */
+th:nth-child(2), td:nth-child(2) { width: 70px; }   /* Count */
+th:nth-child(3), td:nth-child(3) { width: 170px; }  /* Last Seen */
+th:nth-child(6), td:nth-child(6) { width: 140px; }  /* SHA link */
+th:nth-child(5), td:nth-child(5) { width: auto; }   /* Remaining space for Image */
+
 
 a { text-decoration: none; }
 
@@ -24,3 +36,4 @@ a { text-decoration: none; }
 .controls label { display: flex; flex-direction: column; font-size: 0.9rem; }
 .controls input, .controls select { padding: 6px 8px; }
 .pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
+

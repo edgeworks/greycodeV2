@@ -58,6 +58,8 @@
   </tr>
   {% for row in rows %}
   <tr class="{{ row.status }}">
+    <td title="{{ row.image }}" class="mono">{{ row.image or "-" }}</td>
+    <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
     <td>{{ row.status }}</td>
     <td class="num">{{ row.count_total }}</td>
     <td class="mono">{{ row.last_seen or "-" }}</td>
