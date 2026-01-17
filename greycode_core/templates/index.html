@@ -21,6 +21,7 @@
       <option value="last_seen" {% if sort=="last_seen" %}selected{% endif %}>Last seen</option>
       <option value="count_total" {% if sort=="count_total" %}selected{% endif %}>Count</option>
       <option value="status" {% if sort=="status" %}selected{% endif %}>Status</option>
+      <option value="vt_state" {% if sort=="vt_state" %}selected{% endif %}>VT State</option>
     </select>
   </label>
 
@@ -50,23 +51,35 @@
 <table>
   <tr>
     <th>Status</th>
-    <th>VT</th>
+    <th class="col-vtstate">VT State</th>
+    <th>VT Red</th>
     <th>Count</th>
     <th>Last Seen</th>
     <th>Computer</th>
     <th>Image</th>
-    <th>SHA256</th>
+    <th class="col-sha">SHA256</th>
   </tr>
   {% for row in rows %}
   <tr class="{{ row.status }}">
     <td>{{ row.status }}</td>
+    <td class="col-vtstate">
+      {% if row.status == "GREY" and row.vt_state %}
+        <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+      {% elif row.status == "GREY" %}
+        <span class="badge vt-pending">PENDING</span>
+      {% else %}
+        <span class="muted">-</span>
+      {% endif %}
+    </td>
     <td class="num">{{ row.vt_malicious }}</td>
     <td class="num">{{ row.count_total }}</td>
     <td class="mono">{{ row.last_seen or "-" }}</td>
     <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
     <td title="{{ row.image }}" class="mono">{{ row.image or "-" }}</td>
-    <td>
+    <td class="col-sha">
       <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a>
+      <span class="sep">|</span>
+      <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
     </td>
   </tr>
   {% endfor %}

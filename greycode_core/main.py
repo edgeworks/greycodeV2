@@ -1,3 +1,4 @@
+from hashlib import sha256
 from fastapi import FastAPI
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -12,6 +13,7 @@ import datetime
 import json
 import os
 from typing import Optional
+import daytime
 
 
 
@@ -39,6 +41,14 @@ class ProcessEvent(BaseModel):
     computer: str
     image: str
 
+def fmt_epoch(ts: Optional[str]) -> str:
+    if not ts:
+        return "-"
+    try:
+        f = float(ts)
+    except (ValueError, TypeError):
+        return "-"
+    return datetime.datetime.utcfromtimestamp(f).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):
@@ -256,6 +266,7 @@ async def ui_index(
             row = {
                 "sha256": sha,
                 "status": (data.get("status") or "GREY").upper(),
+                "vt_state": (data.get("vt_state") or "").upper(),
                 "vt_malicious": int(data.get("vt_malicious") or 0),
                 "computer": data.get("computer") or "",
                 "image": data.get("image") or "",
@@ -263,6 +274,7 @@ async def ui_index(
                 "first_seen": data.get("first_seen") or "",
                 "last_seen": data.get("last_seen") or "",
                 "source": data.get("source") or "",
+                "vt_link": f"https://www.virustotal.com/gui/file/{sha}",
             }
 
             # 2) Apply filters
@@ -290,6 +302,8 @@ async def ui_index(
         rows.sort(key=lambda x: (rank.get(x["status"], 99), x["last_seen"]), reverse=False)
         if reverse:
             rows.reverse()
+    elif sort == "vt_state":
+        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
     else:
         # default: last_seen
         rows.sort(key=lambda x: x["last_seen"], reverse=reverse)
@@ -325,6 +339,9 @@ async def ui_index(
 async def ui_hash_detail(request: Request, sha256: str):
     key = f"greycode:sha256:{sha256}"
     data = await r.hgetall(key)
+    data["vt_last_checked_fmt"] = fmt_epoch(data.get("vt_last_checked"))
+    data["vt_next_retry_at_fmt"] = fmt_epoch(data.get("vt_next_retry_at"))
+    data["vt_link"] = f"https://www.virustotal.com/gui/file/{sha256}"
     metrics = await get_ui_metrics()
 
     if not data:

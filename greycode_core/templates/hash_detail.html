@@ -1,27 +1,65 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Hash Details</h2>
-<ul>
-  <li><b>SHA256:</b> {{ sha256 }}</li>
-  <li><b>Status:</b> {{ data.status }}</li>
-  <li><b>Source:</b> {{ data.source }}</li>
 
-  <li><b>Count (total):</b> {{ data.count_total or "0" }}</li>
-  <li><b>First Seen:</b> {{ data.first_seen or "-" }}</li>
-  <li><b>Last Seen:</b> {{ data.last_seen or "-" }}</li>
+<div class="detail-header">
+  <h2>Hash Details</h2>
+  <div class="mono big">{{ sha256 }}</div>
+  <div class="detail-badges">
+    <span class="badge status-{{ (data.status or 'GREY')|lower }}">{{ data.status or "GREY" }}</span>
+    {% if data.vt_state %}
+      <span class="badge vt-{{ data.vt_state|lower }}">{{ data.vt_state }}</span>
+    {% endif %}
+    {% if data.disposition %}
+      <span class="badge disp-{{ data.disposition|lower }}">{{ data.disposition }}</span>
+    {% endif %}
+  </div>
+</div>
 
-  <li><b>Computer (first seen):</b> {{ data.computer or "-" }}</li>
-  <li><b>Image (first seen):</b> <span class="mono">{{ data.image or "-" }}</span></li>
+<div class="detail-grid">
+  <section class="card">
+    <h3>Summary</h3>
+    <dl>
+      <dt>Status</dt><dd>{{ data.status or "-" }}</dd>
+      <dt>Source</dt><dd>{{ data.source or "-" }}</dd>
+      <dt>Total Count</dt><dd>{{ data.count_total or "0" }}</dd>
+      <dt>First Seen</dt><dd>{{ data.first_seen or "-" }}</dd>
+      <dt>Last Seen</dt><dd>{{ data.last_seen or "-" }}</dd>
+    </dl>
+  </section>
 
-  <li><b>VT Malicious Detections:</b> {{ data.vt_malicious or "0" }}</li>
-  <li><b>VT Suspicious Detections:</b> {{ data.vt_suspicious or "0" }}</li>
-  <li><b>VT Last Checked:</b> {{ data.vt_last_checked or "-" }}</li>
-  <li><b>VT State:</b> {{ data.vt_state or "-" }}</li>
-  <li><b>VT Next Retry At:</b> {{ data.vt_next_retry_at or "-" }}</li>
-  <li><b>VT HTTP Status:</b> {{ data.vt_http_status or "-" }}</li>
-  {% if data.uuid %}
-  <li><b>UUID:</b> <span class="mono">{{ data.uuid }}</span></li>
-  {% endif %}
-</ul>
-<a href="/ui">Back</a>
+  <section class="card">
+    <h3>Execution Context</h3>
+    <dl>
+      <dt>Computer (first seen)</dt><dd>{{ data.computer or "-" }}</dd>
+      <dt>Image (first seen)</dt><dd class="mono wrap">{{ data.image or "-" }}</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h3>VirusTotal</h3>
+    <dl>
+      <dt>Detections (malicious)</dt><dd>{{ data.vt_malicious or "0" }}</dd>
+      <dt>Detections (suspicious)</dt><dd>{{ data.vt_suspicious or "0" }}</dd>
+      <dt>VT State</dt><dd>{{ data.vt_state or "-" }}</dd>
+      <dt>HTTP Status</dt><dd>{{ data.vt_http_status or "-" }}</dd>
+      <dt>Last Checked</dt><dd>{{ data.vt_last_checked_fmt or "-" }}</dd>
+      <dt>Next Retry</dt><dd>{{ data.vt_next_retry_at_fmt or "-" }}</dd>
+      <dt>Link</dt>
+      <dd><a href="{{ data.vt_link }}" target="_blank" rel="noopener noreferrer">Open in VirusTotal</a></dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h3>Internal</h3>
+    <dl>
+      <dt>UUID</dt><dd class="mono wrap">{{ data.uuid or "-" }}</dd>
+      {% if data.vt_queued_at %}
+      <dt>VT queued</dt><dd>{{ data.vt_queued_at }}</dd>
+      {% endif %}
+    </dl>
+  </section>
+</div>
+
+<p><a href="/ui">Back</a></p>
+
 {% endblock %}
