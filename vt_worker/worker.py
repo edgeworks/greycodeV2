@@ -158,7 +158,48 @@ async def query_virustotal(sha256: str):
     )
 
 
-async def main():
+async def requeue_due_staged(interval=30):
+    """
+    Periodically requeue staged VT candidates whose retry time has passed.
+    This is a minimal replacement for a full selector.
+    """
+    while True:
+        if not vt_enabled():
+            await asyncio.sleep(interval)
+            continue
+
+        now = time.time()
+        candidates = await r.srandmember("greycode:staged:vt_candidates", number=50)
+        if not candidates:
+            await asyncio.sleep(interval)
+            continue
+
+        for sha256 in candidates:
+            if not sha256:
+                continue
+
+            data = await r.hgetall(f"greycode:sha256:{sha256}")
+            nra = data.get("vt_next_retry_at")
+
+            # no retry constraint OR retry time passed → requeue
+            if not nra:
+                await r.lpush("greycode:queue:vt", sha256)
+                await r.srem("greycode:staged:vt_candidates", sha256)
+                continue
+
+            try:
+                if float(nra) <= now:
+                    await r.lpush("greycode:queue:vt", sha256)
+                    await r.srem("greycode:staged:vt_candidates", sha256)
+            except ValueError:
+                # malformed timestamp → requeue conservatively
+                await r.lpush("greycode:queue:vt", sha256)
+                await r.srem("greycode:staged:vt_candidates", sha256)
+
+        await asyncio.sleep(interval)
+
+
+async def worker_loop():
     while True:
         # Block up to 5 seconds waiting for work
         item = await r.brpop("greycode:queue:vt", timeout=5)
@@ -192,6 +233,13 @@ async def main():
         # Enrichment mode
         await query_virustotal(sha256)
         await asyncio.sleep(60 / RATE_LIMIT)
+
+
+async def main():
+    await asyncio.gather(
+        worker_loop(),
+        requeue_due_staged(),
+    )
 
 
 if __name__ == "__main__":
