@@ -23,5 +23,30 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    (function () {
+      function setColVisible(col, visible) {
+        document.querySelectorAll(".col-" + col).forEach(function (el) {
+          el.style.display = visible ? "" : "none";
+        });
+        localStorage.setItem("greycode_col_" + col, visible ? "1" : "0");
+      }
+
+      document.querySelectorAll("input[type=checkbox][data-col]").forEach(function (cb) {
+        var col = cb.getAttribute("data-col");
+        var saved = localStorage.getItem("greycode_col_" + col);
+
+        if (saved !== null) cb.checked = (saved === "1");
+
+        setColVisible(col, cb.checked);
+
+        cb.addEventListener("change", function () {
+          setColVisible(col, cb.checked);
+        });
+      });
+    })();
+  </script>
+
 </body>
 </html>

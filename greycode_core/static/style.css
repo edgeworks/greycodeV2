@@ -63,9 +63,14 @@ dd { margin: 0; color: #222; }
 .badge.status-grey { background: #f0f0f0; border-color: #bbb; }
 .badge.status-error { background: #fff3cd; border-color: #e0c36a; }
 
-/* VT state badge styles */
+
 .badge.vt-pending { background: #f0f0f0; border-color: #bbb; }
 .badge.vt-not_found { background: #eef6ff; border-color: #8bbcff; }
 .badge.vt-rate_limited { background: #fff3cd; border-color: #e0c36a; }
 .badge.vt-found { background: #e6ffe6; border-color: #7fd27f; }
 .badge.vt-error { background: #ffe6e6; border-color: #d27f7f; }
+
+.col-toggles { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.col-toggles label { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; }
+
+.badge.vtred { background: #ffe6e6; border-color: #d27f7f; font-weight: 700; }

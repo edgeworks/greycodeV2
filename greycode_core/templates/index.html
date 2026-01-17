@@ -46,22 +46,34 @@
   <button type="submit">Apply</button>
 </form>
 
+<div class="col-toggles">
+  <span class="muted">Columns:</span>
+  <label><input type="checkbox" data-col="vtstate" checked> VT State</label>
+  <label><input type="checkbox" data-col="vtred" checked> VT Red</label>
+  <label><input type="checkbox" data-col="count" checked> Count</label>
+  <label><input type="checkbox" data-col="lastseen" checked> Last Seen</label>
+  <label><input type="checkbox" data-col="computer" checked> Computer</label>
+  <label><input type="checkbox" data-col="image" checked> Image</label>
+</div>
+
 <p><b>Results:</b> {{ total }} (showing {{ rows|length }})</p>
 
 <table>
   <tr>
-    <th>Status</th>
+    <th class="col-status">Status</th>
     <th class="col-vtstate">VT State</th>
-    <th>VT Red</th>
-    <th>Count</th>
-    <th>Last Seen</th>
-    <th>Computer</th>
-    <th>Image</th>
+    <th class="col-vtred">VT Red</th>
+    <th class="col-count">Count</th>
+    <th class="col-lastseen">Last Seen</th>
+    <th class="col-computer">Computer</th>
+    <th class="col-image">Image</th>
     <th class="col-sha">SHA256</th>
   </tr>
+
   {% for row in rows %}
   <tr class="{{ row.status }}">
-    <td>{{ row.status }}</td>
+    <td class="col-status">{{ row.status }}</td>
+
     <td class="col-vtstate">
       {% if row.status == "GREY" and row.vt_state %}
         <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
@@ -71,11 +83,20 @@
         <span class="muted">-</span>
       {% endif %}
     </td>
-    <td class="num">{{ row.vt_malicious }}</td>
-    <td class="num">{{ row.count_total }}</td>
-    <td class="mono">{{ row.last_seen or "-" }}</td>
-    <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
-    <td title="{{ row.image }}" class="mono">{{ row.image or "-" }}</td>
+
+    <td class="col-vtred">
+      {% if row.vt_malicious and row.vt_malicious|int > 0 %}
+        <span class="badge vtred">{{ row.vt_malicious }}</span>
+      {% else %}
+        <span class="muted">-</span>
+      {% endif %}
+    </td>
+
+    <td class="col-count num">{{ row.count_total }}</td>
+    <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
+    <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+    <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+
     <td class="col-sha">
       <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:9] }}…</a>
       <span class="sep">|</span>
