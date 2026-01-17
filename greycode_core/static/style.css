@@ -16,7 +16,7 @@ th:nth-child(1), td:nth-child(1) { width: 70px; }   /* Status */
 th:nth-child(2), td:nth-child(2) { width: 90px; }   /* VT State */
 th:nth-child(3), td:nth-child(3) { width: 60px; }   /* VT Red */
 th:nth-child(4), td:nth-child(4) { width: 70px; }   /* Count */
-th:nth-child(5), td:nth-child(5) { width: 190px; }  /* Last Seen */
+th:nth-child(5), td:nth-child(5) { width: 230px; }  /* Last Seen */
 th:nth-child(6), td:nth-child(6) { width: 180px; }  /* Computer */
 th:nth-child(8), td:nth-child(8) { width: 150px; }  /* SHA link */
 th:nth-child(7), td:nth-child(7) { width: auto; }   /* Remaining space for Image */
