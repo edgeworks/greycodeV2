@@ -16,6 +16,9 @@
   <li><b>VT Malicious Detections:</b> {{ data.vt_malicious or "0" }}</li>
   <li><b>VT Suspicious Detections:</b> {{ data.vt_suspicious or "0" }}</li>
   <li><b>VT Last Checked:</b> {{ data.vt_last_checked or "-" }}</li>
+  <li><b>VT State:</b> {{ data.vt_state or "-" }}</li>
+  <li><b>VT Next Retry At:</b> {{ data.vt_next_retry_at or "-" }}</li>
+  <li><b>VT HTTP Status:</b> {{ data.vt_http_status or "-" }}</li>
   {% if data.uuid %}
   <li><b>UUID:</b> <span class="mono">{{ data.uuid }}</span></li>
   {% endif %}

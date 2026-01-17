@@ -61,6 +61,7 @@ async def enrich_process(event: ProcessEvent):
         key,
         mapping={
             "status": "GREY",
+            "vt_state": "PENDING",
             "source": "pending",
             "first_seen": now,
             "last_seen": now,
@@ -148,6 +149,7 @@ async def enrich_process_bulk(request: Request):
                 key,
                 mapping={
                     "status": "GREY",
+                    "vt_state": "PENDING",
                     "source": "pending",
                     "first_seen": now,
                     "last_seen": now,
