@@ -77,7 +77,7 @@
     <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
     <td title="{{ row.image }}" class="mono">{{ row.image or "-" }}</td>
     <td class="col-sha">
-      <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:12] }}…</a>
+      <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:9] }}…</a>
       <span class="sep">|</span>
       <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
     </td>
