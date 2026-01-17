@@ -327,7 +327,6 @@ async def ui_index(
             "sort": sort,
             "order": order,
             "vt_enabled": vt_enabled(),
-            # if you already have metrics:
             **(await get_ui_metrics()),
         },
     )
@@ -351,7 +350,8 @@ async def ui_hash_detail(request: Request, sha256: str):
         {
             "request": request, 
             "sha256": sha256, 
-            "data": data, 
-            **metrics
+            "data": data,
+            "vt_enabled": vt_enabled(), 
+            **(await get_ui_metrics()),
         },
     )
