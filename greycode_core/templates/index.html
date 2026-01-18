@@ -58,53 +58,86 @@
 
 <p><b>Results:</b> {{ total }} (showing {{ rows|length }})</p>
 
-<table>
-  <tr>
-    <th class="col-status">Status</th>
-    <th class="col-vtstate">VT State</th>
-    <th class="col-vtred">VT Red</th>
-    <th class="col-count">Count</th>
-    <th class="col-lastseen">Last Seen</th>
-    <th class="col-computer">Computer</th>
-    <th class="col-image">Image</th>
-    <th class="col-sha">SHA256</th>
-  </tr>
+<form ... id="bulkForm">
+  <form method="post" action="/ui/bulk_action" class="bulkbar" id="bulkForm">
+    <label class="bulkitem">
+      <input type="checkbox" id="selectAll">
+      Select all on page
+    </label>
 
-  {% for row in rows %}
-  <tr class="{{ row.status }}">
-    <td class="col-status">{{ row.status }}</td>
+    <label class="bulkitem">
+      Action:
+      <select name="action" id="bulkAction">
+        <option value="accept">Accept (Benign)</option>
+        <option value="escalate">Escalate</option>
+        <option value="clear">Clear disposition</option>
+        <option value="recheck">Recheck (VT)</option>
+        <option value="delete">Delete</option>
+      </select>
+    </label>
 
-    <td class="col-vtstate">
-      {% if row.status == "GREY" and row.vt_state %}
-        <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
-      {% elif row.status == "GREY" %}
-        <span class="badge vt-pending">PENDING</span>
-      {% else %}
-        <span class="muted">-</span>
-      {% endif %}
-    </td>
+    <label class="bulkitem">
+      Ticket (for escalate):
+      <input type="text" name="ticket_id" id="bulkTicket" placeholder="INC123456">
+    </label>
 
-    <td class="col-vtred">
-      {% if row.vt_malicious and row.vt_malicious|int > 0 %}
-        <span class="badge vtred">{{ row.vt_malicious }}</span>
-      {% else %}
-        <span class="muted">-</span>
-      {% endif %}
-    </td>
+    <button type="submit" class="bulkitem">Apply to selected</button>
+  </form>
 
-    <td class="col-count num">{{ row.count_total }}</td>
-    <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
-    <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
-    <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+  <table>
+    <tr>
+      <th class="col-sel"></th>
+      <th class="col-status">Status</th>
+      <th class="col-vtstate">VT State</th>
+      <th class="col-vtred">VT Red</th>
+      <th class="col-count">Count</th>
+      <th class="col-lastseen">Last Seen</th>
+      <th class="col-computer">Computer</th>
+      <th class="col-image">Image</th>
+      <th class="col-sha">SHA256</th>
+    </tr>
 
-    <td class="col-sha">
-      <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:9] }}…</a>
-      <span class="sep">|</span>
-      <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
-    </td>
-  </tr>
-  {% endfor %}
-</table>
+    {% for row in rows %}
+    <tr class="{{ row.status }}">
+      
+      <td class="col-sel">
+        <input type="checkbox" name="selected" value="{{ row.sha256 }}" class="rowSelect">
+      </td>
+      
+      <td class="col-status">{{ row.status }}</td>
+
+      <td class="col-vtstate">
+        {% if row.status == "GREY" and row.vt_state %}
+          <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+        {% elif row.status == "GREY" %}
+          <span class="badge vt-pending">PENDING</span>
+        {% else %}
+          <span class="muted">-</span>
+        {% endif %}
+      </td>
+
+      <td class="col-vtred">
+        {% if row.vt_malicious and row.vt_malicious|int > 0 %}
+          <span class="badge vtred">{{ row.vt_malicious }}</span>
+        {% else %}
+          <span class="muted">-</span>
+        {% endif %}
+      </td>
+
+      <td class="col-count num">{{ row.count_total }}</td>
+      <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
+      <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+      <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+
+      <td class="col-sha">
+        <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:9] }}…</a>
+        <span class="sep">|</span>
+        <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</form>
 
 <div class="pager">
   {% if page > 1 %}

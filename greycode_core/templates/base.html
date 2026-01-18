@@ -26,6 +26,9 @@
 
   <script>
     (function () {
+      // -----------------------------
+      // Column toggles
+      // -----------------------------
       function setColVisible(col, visible) {
         document.querySelectorAll(".col-" + col).forEach(function (el) {
           el.style.display = visible ? "" : "none";
@@ -38,15 +41,48 @@
         var saved = localStorage.getItem("greycode_col_" + col);
 
         if (saved !== null) cb.checked = (saved === "1");
-
         setColVisible(col, cb.checked);
 
         cb.addEventListener("change", function () {
           setColVisible(col, cb.checked);
         });
       });
+
+      // -----------------------------
+      // Bulk selection + delete confirm
+      // -----------------------------
+      var selectAll = document.getElementById("selectAll");
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          document.querySelectorAll("input.rowSelect").forEach(function (cb) {
+            cb.checked = selectAll.checked;
+          });
+        });
+      }
+
+      var bulkForm = document.getElementById("bulkForm");
+      var bulkAction = document.getElementById("bulkAction");
+      if (bulkForm && bulkAction) {
+        bulkForm.addEventListener("submit", function (e) {
+          // Count selected rows
+          var selectedCount = document.querySelectorAll("input.rowSelect:checked").length;
+
+          if (selectedCount === 0) {
+            // Nothing selected; prevent no-op submit
+            e.preventDefault();
+            return;
+          }
+
+          if (bulkAction.value === "delete") {
+            if (!confirm("Delete " + selectedCount + " entries? This cannot be undone.")) {
+              e.preventDefault();
+            }
+          }
+        });
+      }
     })();
   </script>
+
 
 </body>
 </html>
