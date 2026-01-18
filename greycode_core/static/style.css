@@ -18,9 +18,9 @@ td[title] { cursor: help; }
 /* Table sizing:  */
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 
-.col-sel { width: 16px; }
+.col-sel { width: 32px; }
 .col-status { width: 110px; }
-.col-vtstate { width: 130px; }
+.col-vtstate { width: 110px; }
 .col-count { width: 80px; }
 .col-lastseen { width: 210px; }
 .col-computer { width: 190px; }
