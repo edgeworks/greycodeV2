@@ -34,6 +34,7 @@ th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-image { white-space: nowrap; }
 
 .col-status { display: flex; gap: 8px; align-items: center; }
+.col-status span { min-width: 0; }
 .status-text { font-weight: 600; }
 
 
