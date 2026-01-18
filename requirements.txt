@@ -3,3 +3,4 @@ uvicorn
 redis>=4.5
 httpx
 jinja2
+python-multipart
