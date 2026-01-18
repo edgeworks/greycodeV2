@@ -14,16 +14,27 @@ td[title] { cursor: help; }
 
 .bulkbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 10px 0 12px; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
 .bulkitem { display: inline-flex; gap: 6px; align-items: center; }
-.col-sel { width: 32px; }
 
-th:nth-child(1), td:nth-child(1) { width: 70px; }   /* Status */
-th:nth-child(2), td:nth-child(2) { width: 90px; }   /* VT State */
-th:nth-child(3), td:nth-child(3) { width: 60px; }   /* VT Red */
-th:nth-child(4), td:nth-child(4) { width: 70px; }   /* Count */
-th:nth-child(5), td:nth-child(5) { width: 230px; }  /* Last Seen */
-th:nth-child(6), td:nth-child(6) { width: 180px; }  /* Computer */
-th:nth-child(8), td:nth-child(8) { width: 150px; }  /* SHA link */
-th:nth-child(7), td:nth-child(7) { width: auto; }   /* Remaining space for Image */
+/* Table sizing:  */
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+
+.col-sel { width: 32px; }
+.col-status { width: 110px; }
+.col-vtstate { width: 110px; }
+.col-count { width: 80px; }
+.col-lastseen { width: 210px; }
+.col-computer { width: 190px; }
+.col-sha { width: 150px; }
+
+/* Let Image take remaining space */
+.col-image { width: auto; }
+
+/* Prevent cells from forcing horizontal scroll */
+th, td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-image { white-space: nowrap; }
+
+.col-status { display: flex; gap: 8px; align-items: center; }
+.status-text { font-weight: 600; }
 
 
 a { text-decoration: none; }
@@ -77,5 +88,12 @@ dd { margin: 0; color: #222; }
 .col-toggles { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .col-toggles label { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; }
 
-.badge.vtred { background: #ffe6e6; border-color: #d27f7f; font-weight: 700; }
+.badge.vtred {
+  background: #ffe6e6;
+  border: 1px solid #d27f7f;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
 

@@ -89,7 +89,6 @@
       <th class="col-sel"></th>
       <th class="col-status">Status</th>
       <th class="col-vtstate">VT State</th>
-      <th class="col-vtred">VT Red</th>
       <th class="col-count">Count</th>
       <th class="col-lastseen">Last Seen</th>
       <th class="col-computer">Computer</th>
@@ -104,21 +103,20 @@
         <input type="checkbox" name="selected" value="{{ row.sha256 }}" class="rowSelect">
       </td>
       
-      <td class="col-status">{{ row.status }}</td>
+      <td class="col-status">
+        <span class="status-text">{{ row.status }}</span>
+
+        {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
+          <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
+        {% endif %}
+      </td>
+
 
       <td class="col-vtstate">
         {% if row.status == "GREY" and row.vt_state %}
           <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
         {% elif row.status == "GREY" %}
           <span class="badge vt-pending">PENDING</span>
-        {% else %}
-          <span class="muted">-</span>
-        {% endif %}
-      </td>
-
-      <td class="col-vtred">
-        {% if row.vt_malicious and row.vt_malicious|int > 0 %}
-          <span class="badge vtred">{{ row.vt_malicious }}</span>
         {% else %}
           <span class="muted">-</span>
         {% endif %}
