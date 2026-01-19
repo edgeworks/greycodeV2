@@ -80,16 +80,13 @@ async def query_virustotal(sha256: str):
             mapping={
                 "status": "GREY",
                 "source": "vt",
-                "vt_state": "RATE_LIMITED",
+                "vt_state": "DAILY_LIMIT",
                 "vt_http_status": "DAILY_LIMIT",
                 "vt_last_checked": str(now),
                 "vt_next_retry_at": str(next_retry) if next_retry else "",
             },
         )
         return
-
-    # 2) Spend budget (conservative: spend when you actually attempt a call)
-    await vt_budget_spend(r, sha256)
 
     headers = {"x-apikey": VT_API_KEY}
     url = VT_URL.format(sha256)
@@ -136,7 +133,7 @@ async def query_virustotal(sha256: str):
                 sha256=sha256,
                 status="RED",
                 vt_malicious=malicious,
-                vt_suspicious=int(stats.get("suspicious", 0)),
+                vt_suspicious=suspicious,
                 computer=computer,
                 image=image,
                 source="vt",
@@ -146,6 +143,8 @@ async def query_virustotal(sha256: str):
 
             await alert_router.send(alert)
             await r.hset(key, mapping={"alerted_red": "1", "alerted_red_at": str(time.time())})
+        
+        await vt_budget_spend(r, sha256)
 
         return
 
@@ -162,11 +161,19 @@ async def query_virustotal(sha256: str):
                 "vt_next_retry_at": "",
             },
         )
+
+        await vt_budget_spend(r, sha256)
+
         return
 
     if resp.status_code == 429:
         # Expected: schedule retry rather than marking ERROR
-        next_retry_at = now + VT_RETRY_SECONDS_429
+        retry_after = resp.headers.get("Retry-After")
+        if retry_after and retry_after.isdigit():
+            next_retry_at = now + int(retry_after)
+        else:
+            next_retry_at = now + VT_RETRY_SECONDS_429
+
         await r.hset(
             key,
             mapping={
