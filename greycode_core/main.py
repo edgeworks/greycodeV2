@@ -412,6 +412,8 @@ async def ui_index(
                 "status": (data.get("status") or "GREY").upper(),
                 "vt_state": (data.get("vt_state") or "").upper(),
                 "vt_malicious": int(data.get("vt_malicious") or 0),
+                "disposition": (data.get("disposition") or "").upper(),
+                "ticket_id": data.get("ticket_id") or "",
                 "computer": data.get("computer") or "",
                 "image": data.get("image") or "",
                 "count_total": int(data.get("count_total") or 0),

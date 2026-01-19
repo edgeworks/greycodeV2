@@ -104,6 +104,18 @@
         {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
           <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
         {% endif %}
+        
+        {% if row.disposition %}
+          {% if row.disposition == "ACCEPTED" %}
+            <span class="badge disp-accepted" title="Accepted by analyst">ACCEPTED</span>
+          {% elif row.disposition == "ESCALATED" %}
+            <span class="badge disp-escalated"
+              title="Escalated{% if row.ticket_id %}: {{ row.ticket_id }}{% endif %}">ESCALATED
+            </span>
+          {% else %}
+            <span class="badge disp-other" title="Disposition">{{ row.disposition }}</span>
+          {% endif %}
+        {% endif %}
 
         {% if row.status == "GREY" %}
           {% if row.vt_state %}
