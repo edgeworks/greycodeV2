@@ -8,9 +8,14 @@ import time
 import datetime
 from typing import Optional, Tuple
 
+from greycode_core.alerts import AlertRouter, AlertEvent
+    
+
 VT_API_KEY = os.getenv("VT_API_KEY")
 VT_URL = "https://www.virustotal.com/api/v3/files/{}"
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
+
+alert_router = AlertRouter()
 
 RATE_LIMIT = 3  # VirusTotal free tier: 3 requests per minute
 VT_24H_LIMIT = 500 # VirusTotal free tier: 500 requests per day
@@ -63,6 +68,10 @@ async def query_virustotal(sha256: str):
     now = time.time()
     key = f"greycode:sha256:{sha256}"
 
+    prev = await r.hgetall(key)
+    prev_status = (prev.get("status") or "GREY").upper()
+    already_alerted = (prev.get("alerted_red") or "") == "1"
+
     # 1) Rolling 24-hour budget gate
     allowed, next_retry = await vt_budget_allow_or_next_retry(r)
     if not allowed:
@@ -112,6 +121,32 @@ async def query_virustotal(sha256: str):
                 "vt_next_retry_at": "",
             },
         )
+
+        if status == "RED" and prev_status != "RED" and not already_alerted:
+            computer = prev.get("computer") or ""
+            image = prev.get("image") or ""
+
+            vt_link = f"https://www.virustotal.com/gui/file/{sha256}"
+            # If you can set a base URL, include it. If not, omit.
+            ui_base = os.getenv("GREYCODE_UI_BASE_URL", "").rstrip("/")
+            ui_link = f"{ui_base}/ui/hash/{sha256}" if ui_base else None
+
+            alert = AlertEvent(
+                alert_type="HASH_RED",
+                sha256=sha256,
+                status="RED",
+                vt_malicious=malicious,
+                vt_suspicious=int(stats.get("suspicious", 0)),
+                computer=computer,
+                image=image,
+                source="vt",
+                vt_link=vt_link,
+                ui_link=ui_link,
+            )
+
+            await alert_router.send(alert)
+            await r.hset(key, mapping={"alerted_red": "1", "alerted_red_at": str(time.time())})
+
         return
 
     if resp.status_code == 404:
