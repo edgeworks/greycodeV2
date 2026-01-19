@@ -13,7 +13,7 @@ th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; vertical-align: top; 
 .col-count { width: 80px; }
 .col-lastseen { width: 210px; }
 .col-computer { width: 190px; }
-.col-sha { width: 150px; }
+.col-sha { width: 155px; }
 /* Let Image take remaining space */
 .col-image { width: auto; }
 

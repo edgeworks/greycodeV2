@@ -72,27 +72,28 @@ async def query_virustotal(sha256: str):
     prev_status = (prev.get("status") or "GREY").upper()
     already_alerted = (prev.get("alerted_red") or "") == "1"
 
-    # 1) Rolling 24-hour budget gate
-    allowed, next_retry = await vt_budget_allow_or_next_retry(r)
-    if not allowed:
+    headers = {"x-apikey": VT_API_KEY}
+    url = VT_URL.format(sha256)
+
+    
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
+    except Exception:
+        # transient failure: stage again for later retry
         await r.hset(
             key,
             mapping={
                 "status": "GREY",
                 "source": "vt",
-                "vt_state": "DAILY_LIMIT",
-                "vt_http_status": "DAILY_LIMIT",
+                "vt_state": "ERROR",
+                "vt_http_status": "NET_ERROR",
                 "vt_last_checked": str(now),
-                "vt_next_retry_at": str(next_retry) if next_retry else "",
+                "vt_next_retry_at": str(now + 300),
             },
         )
+        await r.sadd("greycode:staged:vt_candidates", sha256)
         return
-
-    headers = {"x-apikey": VT_API_KEY}
-    url = VT_URL.format(sha256)
-
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.get(url, headers=headers)
 
     # 3) Handle responses
     if resp.status_code == 200:
@@ -143,9 +144,8 @@ async def query_virustotal(sha256: str):
 
             await alert_router.send(alert)
             await r.hset(key, mapping={"alerted_red": "1", "alerted_red_at": str(time.time())})
-        
-        await vt_budget_spend(r, sha256)
 
+        await r.hdel(key, "vt_queued_at", "vt_next_retry_at")
         return
 
     if resp.status_code == 404:
@@ -162,8 +162,7 @@ async def query_virustotal(sha256: str):
             },
         )
 
-        await vt_budget_spend(r, sha256)
-
+        await r.hdel(key, "vt_queued_at", "vt_next_retry_at")
         return
 
     if resp.status_code == 429:
@@ -185,6 +184,9 @@ async def query_virustotal(sha256: str):
                 "vt_next_retry_at": str(next_retry_at),
             },
         )
+
+        await r.sadd("greycode:staged:vt_candidates", sha256)
+
         return
 
     # Other errors are operational errors
@@ -198,6 +200,7 @@ async def query_virustotal(sha256: str):
             "vt_last_checked": str(now),
         },
     )
+    await r.hdel(key, "vt_queued_at", "vt_next_retry_at")
 
 
 async def requeue_due_staged(interval=30):
