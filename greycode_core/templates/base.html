@@ -7,6 +7,7 @@
 <body>
   <header>
     <h1>Greycode – Sysmon Threat Enrichment</h1>
+
     <div class="statusbar">
       {% if vt_enabled %}
         <div class="banner enabled">VirusTotal checks: ENABLED</div>
@@ -17,9 +18,11 @@
       <div class="metrics">
         <span><b>VT queue:</b> {{ vt_queue_len }}</span>
         <span><b>Staged candidates:</b> {{ staged_candidates }}</span>
+        <span><b>Known hashes:</b> {{ total_hashes }}</span>
       </div>
     </div>
   </header>
+
   <main>
     {% block content %}{% endblock %}
   </main>

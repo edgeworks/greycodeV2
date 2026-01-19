@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
 
-<p><b>Known hashes:</b> {{ total_hashes }}</p>
-
 <form method="get" class="controls">
   <label>Status:
     <select name="status">
@@ -21,7 +19,7 @@
       <option value="last_seen" {% if sort=="last_seen" %}selected{% endif %}>Last seen</option>
       <option value="count_total" {% if sort=="count_total" %}selected{% endif %}>Count</option>
       <option value="status" {% if sort=="status" %}selected{% endif %}>Status</option>
-      <option value="vt_state" {% if sort=="vt_state" %}selected{% endif %}>VT State</option>
+      <option value="vt_state" {% if sort=="vt_state" %}selected{% endif %}>VT State (GREY)</option>
     </select>
   </label>
 
@@ -48,8 +46,6 @@
 
 <div class="col-toggles">
   <span class="muted">Columns:</span>
-  <label><input type="checkbox" data-col="vtstate" checked> VT State</label>
-  <label><input type="checkbox" data-col="vtred" checked> VT Red</label>
   <label><input type="checkbox" data-col="count" checked> Count</label>
   <label><input type="checkbox" data-col="lastseen" checked> Last Seen</label>
   <label><input type="checkbox" data-col="computer" checked> Computer</label>
@@ -58,8 +54,8 @@
 
 <p><b>Results:</b> {{ total }} (showing {{ rows|length }})</p>
 
-<form ... id="bulkForm">
-  <form method="post" action="/ui/bulk_action" class="bulkbar" id="bulkForm">
+<form method="post" action="/ui/bulk_action" class="bulkwrap" id="bulkForm">
+  <div class="bulkbar">
     <label class="bulkitem">
       <input type="checkbox" id="selectAll">
       Select all on page
@@ -82,13 +78,12 @@
     </label>
 
     <button type="submit" class="bulkitem">Apply to selected</button>
-  </form>
+  </div>
 
   <table>
     <tr>
       <th class="col-sel"></th>
       <th class="col-status">Status</th>
-      <th class="col-vtstate">VT State</th>
       <th class="col-count">Count</th>
       <th class="col-lastseen">Last Seen</th>
       <th class="col-computer">Computer</th>
@@ -104,21 +99,18 @@
       </td>
       
       <td class="col-status">
-        <span class="status-text">{{ row.status }}</span>
+        {{ row.status }}
 
         {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
           <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
         {% endif %}
-      </td>
 
-
-      <td class="col-vtstate">
-        {% if row.status == "GREY" and row.vt_state %}
-          <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
-        {% elif row.status == "GREY" %}
-          <span class="badge vt-pending">PENDING</span>
-        {% else %}
-          <span class="muted">-</span>
+        {% if row.status == "GREY" %}
+          {% if row.vt_state %}
+            <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+          {% else %}
+            <span class="badge vt-pending">PENDING</span>
+          {% endif %}
         {% endif %}
       </td>
 
