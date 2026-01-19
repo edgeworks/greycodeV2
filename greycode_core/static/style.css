@@ -9,7 +9,7 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; vertical-align: top; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .col-sel { width: 32px; }
-.col-status { width: 150px; }
+.col-status { width: 190px; }
 .col-count { width: 80px; }
 .col-lastseen { width: 210px; }
 .col-computer { width: 190px; }
