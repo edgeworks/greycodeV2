@@ -11,6 +11,14 @@ RUN if [ -n "$PIP_PROXY" ]; then \
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-COPY vt_worker/ .
+# Copy worker code
+COPY vt_worker/ /app/vt_worker/
 
-CMD ["python", "worker.py"]
+# Copy shared core package
+COPY greycode_core/ /app/greycode_core/
+
+# Ensure /app is on sys.path
+ENV PYTHONPATH=/app
+
+# Run as module so package imports behave consistently
+CMD ["python", "-m", "vt_worker.worker"]
