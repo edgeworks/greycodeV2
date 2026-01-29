@@ -387,6 +387,7 @@ async def list_hashes(
 async def ui_index(
     request: Request,
     status: str = Query("ALL"),
+    triage: str = Query("ALL"),
     q: str = Query(""),
     sort: str = Query("last_seen"),
     order: str = Query("desc"),
@@ -426,6 +427,16 @@ async def ui_index(
             # 2) Apply filters
             if status != "ALL" and row["status"] != status:
                 continue
+
+            tri = (triage or "ALL").upper()
+            if tri == "OPEN":
+                # Open work queue: RED and no disposition
+                if not (row["status"] == "RED" and row["disposition"] == ""):
+                    continue
+            elif tri == "TRIAGED":
+                # Any disposition set (ACCEPTED/ESCALATED/whatever)
+                if row["disposition"] == "":
+                    continue
 
             if q_lower:
                 hay = f'{row["sha256"]} {row["computer"]} {row["image"]}'.lower()
@@ -470,6 +481,7 @@ async def ui_index(
             "page": page,
             "page_size": page_size,
             "status": status,
+            "triage": triage,
             "q": q,
             "sort": sort,
             "order": order,

@@ -4,11 +4,19 @@
 <form method="get" class="controls">
   <label>Status:
     <select name="status">
-      {% for s in ["ALL","RED","RED ACCEPTED","RED ESCALATED","ERROR","GREY","GREY RATE_LIMITED","GREY PENDING","GREY NOT_FOUND","GREEN"] %}
-        <option value="{{ s }}" {% if s in status %}selected{% endif %}>{{ s }}</option>
+      {% for s in ["ALL","RED","ERROR","GREY","GREEN"] %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>
   </label>
+
+  <label>Triage:
+    <select name="triage">
+      {% for t in ["ALL","OPEN","TRIAGED"] %}
+        <option value="{{ t }}" {% if triage == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </label>  
 
   <label>Search:
     <input type="text" name="q" value="{{ q }}" placeholder="sha256 / computer / path">
@@ -79,6 +87,10 @@
     <button type="submit" class="bulkitem">Apply to selected</button>
   </div>
 
+  <p>
+    <a href="/ui?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open RED queue</a>
+  </p>
+
   <table>
     <tr>
       <th class="col-sel"></th>
@@ -142,7 +154,7 @@
 
 <div class="pager">
   {% if page > 1 %}
-    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}">
+    <a href="?status={{status}}&triage={{triage}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}">
       Prev
     </a>
   {% endif %}
@@ -150,7 +162,7 @@
   <span>Page {{ page }}</span>
 
   {% if page * page_size < total %}
-    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}">
+    <a href="?status={{status}}&triage={{triage}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}">
       Next
     </a>
   {% endif %}
