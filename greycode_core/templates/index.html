@@ -5,7 +5,7 @@
   <label>Status:
     <select name="status">
       {% for s in ["ALL","RED","RED ACCEPTED","RED ESCALATED","ERROR","GREY","GREY RATE_LIMITED","GREY PENDING","GREY NOT_FOUND","GREEN"] %}
-        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        <option value="{{ s }}" {% if s in status %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>
   </label>
