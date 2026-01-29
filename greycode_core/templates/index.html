@@ -4,7 +4,7 @@
 <form method="get" class="controls">
   <label>Status:
     <select name="status">
-      {% for s in ["ALL","RED","ERROR","GREY","GREEN"] %}
+      {% for s in ["ALL","RED","RED ACCEPTED","RED ESCALATED","ERROR","GREY","GREY RATE_LIMITED","GREY PENDING","GREY NOT_FOUND","GREEN"] %}
         <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>
@@ -19,7 +19,6 @@
       <option value="last_seen" {% if sort=="last_seen" %}selected{% endif %}>Last seen</option>
       <option value="count_total" {% if sort=="count_total" %}selected{% endif %}>Count</option>
       <option value="status" {% if sort=="status" %}selected{% endif %}>Status</option>
-      <option value="vt_state" {% if sort=="vt_state" %}selected{% endif %}>VT State (GREY)</option>
     </select>
   </label>
 
