@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 import redis.asyncio as redis
 import uuid
 import datetime
+import ipaddress
 import json
 import os
 import time
@@ -25,6 +26,8 @@ r = redis.Redis(host="redis", port=6379, decode_responses=True)
 templates = Jinja2Templates(directory="templates")
 STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
+STAGED_SET_IP = "greycode:staged:ip_candidates"
+STAGED_SET_DOMAIN = "greycode:staged:domain_candidates"
 
 async def get_ui_metrics():
     vt_queue_len = await r.llen(VT_QUEUE)
@@ -38,9 +41,44 @@ def vt_enabled() -> bool:
     return os.getenv("VT_ENABLED", "0") == "1"
 
 class ProcessEvent(BaseModel):
+    # Sysmon ID 1 fields (Cribl passes sha256, Computer, Image)
     sha256: str
     computer: str
     image: str
+
+class NetworkEvent(BaseModel):
+    # Sysmon ID 3 fields (Cribl passes DestinationIp, Computer)
+    DestinationIp: str
+    Computer: str
+
+class DnsEvent(BaseModel):
+    # Sysmon ID 22 fields (Cribl passes QueryName, Computer)
+    QueryName: str
+    Computer: str
+
+def normalize_ip(ip: str) -> str:
+    """
+    Canonicalize IPv4/IPv6 for keying:
+      - IPv4 stays dotted-decimal
+      - IPv6 becomes compressed lowercase
+    Raises ValueError on invalid input.
+    """
+    ip = (ip or "").strip()
+    if not ip:
+        raise ValueError("empty ip")
+    return str(ipaddress.ip_address(ip))
+
+def normalize_domain(qname: str) -> str:
+    """
+    Normalize DNS query name:
+      - lowercase
+      - strip whitespace
+      - strip trailing dot
+    """
+    d = (qname or "").strip().lower()
+    if d.endswith("."):
+        d = d[:-1]
+    return d
 
 def fmt_epoch(ts: Optional[str]) -> str:
     if not ts:
@@ -252,6 +290,303 @@ async def enrich_process_bulk(request: Request):
         }
     )
 
+@app.post("/enrich/network")
+async def enrich_network(event: NetworkEvent):
+    """
+    Sysmon ID 3 minimal ingest:
+      - Computer
+      - DestinationIp (IPv4/IPv6)
+    """
+    try:
+        ip_norm = normalize_ip(event.DestinationIp)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid DestinationIp")
+
+    key = f"greycode:ip:{ip_norm}"
+    rep = await r.hgetall(key)
+    now = datetime.datetime.utcnow().isoformat()
+
+    if rep:
+        await r.hincrby(key, "count_total", 1)
+        await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        return {
+            "destination_ip": ip_norm,
+            "status": rep.get("status"),
+            "listing_state": rep.get("listing_state"),
+            "source": rep.get("source"),
+            "computer_last": event.Computer,
+        }
+
+    # New record: GREY + PENDING, stage for later blacklist checking
+    await r.hset(
+        key,
+        mapping={
+            "type": "ip",
+            "status": "GREY",
+            "listing_state": "PENDING",
+            "source": "pending",
+            "first_seen": now,
+            "last_seen": now,
+            "computer_first": event.Computer,
+            "computer_last": event.Computer,
+            "count_total": "1",
+            "uuid": str(uuid.uuid4()),
+        },
+    )
+    await r.sadd(STAGED_SET_IP, ip_norm)
+
+    return {
+        "destination_ip": ip_norm,
+        "status": "GREY",
+        "listing_state": "PENDING",
+        "source": "pending",
+        "computer_first": event.Computer,
+    }
+
+
+@app.post("/enrich/network/bulk")
+async def enrich_network_bulk(request: Request):
+    """
+    Bulk Sysmon ID 3 ingest.
+    Accept either:
+      - application/x-ndjson (one JSON object per line)
+      - application/json with a JSON array: [ {...}, {...} ]
+      - application/json with a single object
+    Expected fields per event (Cribl style):
+      - Computer
+      - DestinationIp
+    """
+    ctype = (request.headers.get("content-type") or "").lower()
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace").strip()
+
+    if not body_text:
+        raise HTTPException(status_code=400, detail="Empty request body")
+
+    events = []
+    if "application/x-ndjson" in ctype:
+        for line in body_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid NDJSON line: {e}")
+    else:
+        try:
+            parsed = json.loads(body_text)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        if isinstance(parsed, list):
+            events = parsed
+        elif isinstance(parsed, dict):
+            events = [parsed]
+        else:
+            raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
+
+    accepted = 0
+    rejected = 0
+    errors = []
+
+    for idx, obj in enumerate(events):
+        try:
+            event = NetworkEvent.model_validate(obj)  # Pydantic v2
+        except ValidationError as e:
+            rejected += 1
+            errors.append({"index": idx, "error": e.errors()})
+            continue
+
+        try:
+            ip_norm = normalize_ip(event.DestinationIp)
+        except ValueError:
+            rejected += 1
+            errors.append({"index": idx, "error": "Invalid DestinationIp"})
+            continue
+
+        key = f"greycode:ip:{ip_norm}"
+        rep = await r.hgetall(key)
+        now = datetime.datetime.utcnow().isoformat()
+
+        if rep:
+            await r.hincrby(key, "count_total", 1)
+            await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        else:
+            await r.hset(
+                key,
+                mapping={
+                    "type": "ip",
+                    "status": "GREY",
+                    "listing_state": "PENDING",
+                    "source": "pending",
+                    "first_seen": now,
+                    "last_seen": now,
+                    "computer_first": event.Computer,
+                    "computer_last": event.Computer,
+                    "count_total": "1",
+                    "uuid": str(uuid.uuid4()),
+                },
+            )
+            await r.sadd(STAGED_SET_IP, ip_norm)
+
+        accepted += 1
+
+    return JSONResponse(
+        {
+            "received": len(events),
+            "accepted": accepted,
+            "rejected": rejected,
+            "errors": errors[:20],
+        }
+    )
+
+@app.post("/enrich/dns")
+async def enrich_dns(event: DnsEvent):
+    """
+    Sysmon ID 22 minimal ingest:
+      - Computer
+      - QueryName (domain/hostname)
+    """
+    domain_norm = normalize_domain(event.QueryName)
+    if not domain_norm:
+        raise HTTPException(status_code=400, detail="Invalid QueryName")
+
+    key = f"greycode:domain:{domain_norm}"
+    rep = await r.hgetall(key)
+    now = datetime.datetime.utcnow().isoformat()
+
+    if rep:
+        await r.hincrby(key, "count_total", 1)
+        await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        return {
+            "query_name": domain_norm,
+            "status": rep.get("status"),
+            "listing_state": rep.get("listing_state"),
+            "source": rep.get("source"),
+            "computer_last": event.Computer,
+        }
+
+    await r.hset(
+        key,
+        mapping={
+            "type": "domain",
+            "status": "GREY",
+            "listing_state": "PENDING",
+            "source": "pending",
+            "first_seen": now,
+            "last_seen": now,
+            "computer_first": event.Computer,
+            "computer_last": event.Computer,
+            "count_total": "1",
+            "uuid": str(uuid.uuid4()),
+        },
+    )
+    await r.sadd(STAGED_SET_DOMAIN, domain_norm)
+
+    return {
+        "query_name": domain_norm,
+        "status": "GREY",
+        "listing_state": "PENDING",
+        "source": "pending",
+        "computer_first": event.Computer,
+    }
+
+
+@app.post("/enrich/dns/bulk")
+async def enrich_dns_bulk(request: Request):
+    """
+    Bulk Sysmon ID 22 ingest.
+    Accept either:
+      - application/x-ndjson (one JSON object per line)
+      - application/json with a JSON array: [ {...}, {...} ]
+      - application/json with a single object
+    Expected fields per event (Cribl style):
+      - Computer
+      - QueryName
+    """
+    ctype = (request.headers.get("content-type") or "").lower()
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace").strip()
+
+    if not body_text:
+        raise HTTPException(status_code=400, detail="Empty request body")
+
+    events = []
+    if "application/x-ndjson" in ctype:
+        for line in body_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid NDJSON line: {e}")
+    else:
+        try:
+            parsed = json.loads(body_text)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        if isinstance(parsed, list):
+            events = parsed
+        elif isinstance(parsed, dict):
+            events = [parsed]
+        else:
+            raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
+
+    accepted = 0
+    rejected = 0
+    errors = []
+
+    for idx, obj in enumerate(events):
+        try:
+            event = DnsEvent.model_validate(obj)  # Pydantic v2
+        except ValidationError as e:
+            rejected += 1
+            errors.append({"index": idx, "error": e.errors()})
+            continue
+
+        domain_norm = normalize_domain(event.QueryName)
+        if not domain_norm:
+            rejected += 1
+            errors.append({"index": idx, "error": "Invalid QueryName"})
+            continue
+
+        key = f"greycode:domain:{domain_norm}"
+        rep = await r.hgetall(key)
+        now = datetime.datetime.utcnow().isoformat()
+
+        if rep:
+            await r.hincrby(key, "count_total", 1)
+            await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        else:
+            await r.hset(
+                key,
+                mapping={
+                    "type": "domain",
+                    "status": "GREY",
+                    "listing_state": "PENDING",
+                    "source": "pending",
+                    "first_seen": now,
+                    "last_seen": now,
+                    "computer_first": event.Computer,
+                    "computer_last": event.Computer,
+                    "count_total": "1",
+                    "uuid": str(uuid.uuid4()),
+                },
+            )
+            await r.sadd(STAGED_SET_DOMAIN, domain_norm)
+
+        accepted += 1
+
+    return JSONResponse(
+        {
+            "received": len(events),
+            "accepted": accepted,
+            "rejected": rejected,
+            "errors": errors[:20],
+        }
+    )
+
 @app.post("/ui/hash/{sha256}/accept")
 async def ui_hash_accept(sha256: str):
     await set_disposition(sha256, "ACCEPTED", actor="ui")
@@ -347,6 +682,31 @@ async def get_status(sha256: str):
         **rep,
     }
 
+@app.get("/status/ip/{ip}")
+async def get_status_ip(ip: str):
+    try:
+        ip_norm = normalize_ip(ip)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid IP")
+
+    key = f"greycode:ip:{ip_norm}"
+    rep = await r.hgetall(key)
+    if not rep:
+        return {"ip": ip_norm, "status": "UNKNOWN"}
+    return {"ip": ip_norm, **rep}
+
+
+@app.get("/status/domain/{domain}")
+async def get_status_domain(domain: str):
+    dom = normalize_domain(domain)
+    if not dom:
+        raise HTTPException(status_code=400, detail="Invalid domain")
+
+    key = f"greycode:domain:{dom}"
+    rep = await r.hgetall(key)
+    if not rep:
+        return {"domain": dom, "status": "UNKNOWN"}
+    return {"domain": dom, **rep}
 
 @app.get("/hashes")
 async def list_hashes(
