@@ -66,12 +66,21 @@ def parse_domains_json(text: str) -> Set[str]:
 
 
 async def replace_set(r: redis.Redis, key: str, values: Iterable[str]) -> int:
+    """
+    Replace set contents using a temp key + RENAME.
+    Must handle empty values (Redis won't create a set key unless SADD happens).
+    """
     tmp = f"{key}:tmp"
-    pipe = r.pipeline()
-    await pipe.delete(tmp)
+
+    # Always create the tmp key so RENAME won't fail
+    await r.delete(tmp)
+    await r.sadd(tmp, "__dummy__")   # ensure key exists
+    await r.srem(tmp, "__dummy__")   # remove dummy; key remains as an empty set
 
     batch = []
     count = 0
+    pipe = r.pipeline()
+
     for v in values:
         batch.append(v)
         if len(batch) >= 2000:
@@ -89,12 +98,53 @@ async def replace_set(r: redis.Redis, key: str, values: Iterable[str]) -> int:
 
 async def update() -> None:
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    fetched_at = now_iso()
+
     async with httpx.AsyncClient(headers={"User-Agent": "greycodeV2-updater"}) as client:
         try:
             resp = await client.get(URL, timeout=30.0)
+
+            # Always record HTTP diagnostics (even if non-200 / HTML / proxy)
+            text = resp.text or ""
+            await r.hset(
+                META_KEY,
+                mapping={
+                    "fetched_at": fetched_at,
+                    "http_status": str(resp.status_code),
+                    "body_prefix": text[:160].replace("\n", " "),
+                },
+            )
+
+            # Try to capture ThreatFox query_status if JSON
+            try:
+                js = json.loads(text)
+                if isinstance(js, dict) and "query_status" in js:
+                    await r.hset(META_KEY, mapping={"query_status": str(js.get("query_status"))})
+            except Exception:
+                # Not JSON or parse failed; body_prefix will show why
+                pass
+
+            # Now enforce HTTP success
             resp.raise_for_status()
-            domains = parse_domains_json(resp.text)
+
+            domains = parse_domains_json(text)
             n = await replace_set(r, SET_KEY, domains)
-            await r.hset(META_KEY, mapping={"last_error": "", "fetched_at": now_iso(), "count": str(n)})
+
+            await r.hset(
+                META_KEY,
+                mapping={
+                    "last_error": "",
+                    "fetched_at": fetched_at,
+                    "count": str(n),
+                },
+            )
+
         except Exception as e:
-            await r.hset(META_KEY, mapping={"last_error": str(e), "fetched_at": now_iso()})
+            await r.hset(
+                META_KEY,
+                mapping={
+                    "last_error": str(e),
+                    "fetched_at": fetched_at,
+                },
+            )
+
