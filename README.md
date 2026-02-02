@@ -21,6 +21,7 @@
 greycode/
 ├── greycode_core/        # FastAPI API to receive enrichment requests
 ├── vt_worker/            # Background worker to query VirusTotal
+├── selector/             # Background worker for queue handling
 ├── updater/              # Scheduled plugin-based enrichment feed sync
 ├── docker-compose.yml    # Multi-container setup
 ├── requirements.txt      # Python dependencies
