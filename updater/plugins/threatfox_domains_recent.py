@@ -41,28 +41,30 @@ def parse_domains_json(text: str) -> Set[str]:
         if dom and "." in dom:
             out.add(dom)
 
-    # Defensive parsing: accept common structures
+    # ThreatFox recent format: { "<id>": [ { "ioc_value": "example.com", ... }, ... ], ... }
     if isinstance(data, dict):
-        items = data.get("data")
-        if isinstance(items, list):
-            for item in items:
+        for _, arr in data.items():
+            if not isinstance(arr, list):
+                continue
+            for item in arr:
                 if isinstance(item, dict):
-                    for k in ("ioc", "ioc_value", "indicator", "domain", "host"):
-                        v = item.get(k)
-                        if isinstance(v, str):
-                            try_add(v)
+                    v = item.get("ioc_value") or item.get("ioc") or item.get("indicator") or item.get("domain")
+                    if isinstance(v, str):
+                        try_add(v)
                 elif isinstance(item, str):
                     try_add(item)
+
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, dict):
-                for v in item.values():
-                    if isinstance(v, str):
-                        try_add(v)
+                v = item.get("ioc_value") or item.get("ioc") or item.get("indicator") or item.get("domain")
+                if isinstance(v, str):
+                    try_add(v)
             elif isinstance(item, str):
                 try_add(item)
 
     return out
+
 
 
 async def replace_set(r: redis.Redis, key: str, values: Iterable[str]) -> int:

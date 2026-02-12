@@ -85,27 +85,31 @@ def parse_ipport_json(text: str) -> Set[str]:
         except Exception:
             return
 
+    # ThreatFox recent format: { "<id>": [ { "ioc_value": "1.2.3.4:80", ... }, ... ], ... }
     if isinstance(data, dict):
-        items = data.get("data")
-        if isinstance(items, list):
-            for item in items:
+        for _, arr in data.items():
+            if not isinstance(arr, list):
+                continue
+            for item in arr:
                 if isinstance(item, dict):
-                    for k in ("ioc", "ioc_value", "indicator", "ip", "ip_port", "ip-port"):
-                        v = item.get(k)
-                        if isinstance(v, str):
-                            try_add(v)
-                elif isinstance(item, str):
-                    try_add(item)
-    elif isinstance(data, list):
-        for item in data:
-            if isinstance(item, dict):
-                for v in item.values():
+                    v = item.get("ioc_value") or item.get("ioc") or item.get("indicator")
                     if isinstance(v, str):
                         try_add(v)
+                elif isinstance(item, str):
+                    try_add(item)
+
+    elif isinstance(data, list):
+        # fallback if they ever return list-of-items
+        for item in data:
+            if isinstance(item, dict):
+                v = item.get("ioc_value") or item.get("ioc") or item.get("indicator")
+                if isinstance(v, str):
+                    try_add(v)
             elif isinstance(item, str):
                 try_add(item)
 
     return out
+
 
 
 async def replace_set(r: redis.Redis, key: str, values: Iterable[str]) -> int:
