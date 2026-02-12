@@ -179,6 +179,7 @@ async def update() -> None:
             resp.raise_for_status()
 
             ips = parse_ipport_json(text)
+            await r.hset(META_KEY, mapping={"parsed_count": str(len(ips))})
             n = await replace_set(r, SET_KEY, ips)
 
             await r.hset(

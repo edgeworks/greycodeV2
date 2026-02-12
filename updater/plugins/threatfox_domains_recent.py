@@ -138,6 +138,7 @@ async def update() -> None:
             resp.raise_for_status()
 
             domains = parse_domains_json(text)
+            await r.hset(META_KEY, mapping={"parsed_count": str(len(domains))})
             n = await replace_set(r, SET_KEY, domains)
 
             await r.hset(
