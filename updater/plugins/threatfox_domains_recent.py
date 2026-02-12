@@ -67,33 +67,41 @@ def parse_domains_json(text: str) -> Set[str]:
 
 async def replace_set(r: redis.Redis, key: str, values: Iterable[str]) -> int:
     """
-    Replace set contents using a temp key + RENAME.
-    Must handle empty values (Redis won't create a set key unless SADD happens).
+    Replace set contents using tmp key + RENAME.
+
+    Important: Redis deletes set keys when they become empty, so we keep a dummy
+    member until AFTER RENAME, then remove it from the final key.
     """
     tmp = f"{key}:tmp"
+    dummy = "__dummy__"
 
-    # Always create the tmp key so RENAME won't fail
-    await r.delete(tmp)
-    await r.sadd(tmp, "__dummy__")   # ensure key exists
-    await r.srem(tmp, "__dummy__")   # remove dummy; key remains as an empty set
-
-    batch = []
-    count = 0
     pipe = r.pipeline()
+    pipe.delete(tmp)
 
+    # Ensure tmp key exists
+    pipe.sadd(tmp, dummy)
+
+    count = 0
+    batch = []
     for v in values:
         batch.append(v)
         if len(batch) >= 2000:
-            await pipe.sadd(tmp, *batch)
+            pipe.sadd(tmp, *batch)
             count += len(batch)
             batch = []
     if batch:
-        await pipe.sadd(tmp, *batch)
+        pipe.sadd(tmp, *batch)
         count += len(batch)
 
-    await pipe.rename(tmp, key)
+    # Swap atomically
+    pipe.rename(tmp, key)
+
+    # Remove dummy from the FINAL key
+    pipe.srem(key, dummy)
+
     await pipe.execute()
     return count
+
 
 
 async def update() -> None:
