@@ -1,5 +1,6 @@
 from hashlib import sha256
 from fastapi import FastAPI
+from fastapi import Path as ApiPath
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -744,6 +745,11 @@ async def list_hashes(
 
 
 @app.get("/ui", response_class=HTMLResponse)
+
+# ToDo: Replace or remove when other tabs are finished
+async def ui_redirect():
+    return RedirectResponse(url="/ui/sysmon/1", status_code=302)
+
 async def ui_index(
     request: Request,
     status: str = Query("ALL"),
@@ -845,6 +851,174 @@ async def ui_index(
             "q": q,
             "sort": sort,
             "order": order,
+            "vt_enabled": vt_enabled(),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.get("/ui/sysmon/{event_id}", response_class=HTMLResponse)
+async def ui_sysmon(
+    request: Request,
+    event_id: int = ApiPath(..., ge=1),
+    # Common controls
+    status: str = Query("ALL"),
+    q: str = Query(""),
+    sort: str = Query("last_seen"),
+    order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=10, le=2000),
+
+    # Sysmon 1 specific
+    triage: str = Query("ALL"),  # ALL | OPEN | TRIAGED (only used for event_id=1)
+
+    # Sysmon 3/22 specific
+    listing_state: str = Query("ALL"),  # ALL | PENDING | NO_LISTING | LISTED (only used for 3/22)
+):
+    tab = int(event_id)
+
+    # Map tab -> redis key pattern + primary field name
+    if tab == 1:
+        pattern = "greycode:sha256:*"
+        indicator_label = "SHA256"
+        indicator_field = "sha256"
+        kind = "sha256"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY", "GREEN"}
+    elif tab == 3:
+        pattern = "greycode:ip:*"
+        indicator_label = "DestinationIp"
+        indicator_field = "ip"
+        kind = "ip"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+    elif tab == 22:
+        pattern = "greycode:domain:*"
+        indicator_label = "QueryName"
+        indicator_field = "domain"
+        kind = "domain"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+    else:
+        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+    status = (status or "ALL").upper()
+    if status not in allowed_status:
+        status = "ALL"
+
+    q_lower = (q or "").strip().lower()
+
+    rows = []
+    cursor = 0
+    total_seen = 0
+
+    while True:
+        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
+        for key in keys:
+            total_seen += 1
+            data = await r.hgetall(key)
+
+            # indicator value extracted from redis key
+            indicator = key.split(":", 2)[-1]  # works for sha256/ip/domain patterns
+
+            row = {
+                "kind": kind,
+                indicator_field: indicator,
+                "status": (data.get("status") or "GREY").upper(),
+                "listing_state": (data.get("listing_state") or "").upper(),
+                "vt_state": (data.get("vt_state") or "").upper(),
+                "vt_malicious": int(data.get("vt_malicious") or 0),
+                "disposition": (data.get("disposition") or "").upper(),
+                "ticket_id": data.get("ticket_id") or "",
+                "count_total": int(data.get("count_total") or 0),
+                "first_seen": data.get("first_seen") or "",
+                "last_seen": data.get("last_seen") or "",
+                "source": data.get("source") or "",
+                # context fields differ by kind
+                "computer": data.get("computer") or "",
+                "computer_first": data.get("computer_first") or "",
+                "computer_last": data.get("computer_last") or "",
+                "image": data.get("image") or "",
+                # links
+                "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
+            }
+
+            # Filters
+            if status != "ALL" and row["status"] != status:
+                continue
+
+            if tab == 1:
+                tri = (triage or "ALL").upper()
+                if tri == "OPEN":
+                    if not (row["status"] == "RED" and row["disposition"] == ""):
+                        continue
+                elif tri == "TRIAGED":
+                    if row["disposition"] == "":
+                        continue
+
+            if tab in (3, 22):
+                ls = (listing_state or "ALL").upper()
+                if ls != "ALL":
+                    if row["listing_state"] != ls:
+                        continue
+
+            if q_lower:
+                # search across relevant fields
+                if tab == 1:
+                    hay = f'{row.get("sha256","")} {row.get("computer","")} {row.get("image","")}'.lower()
+                elif tab == 3:
+                    hay = f'{row.get("ip","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
+                else:
+                    hay = f'{row.get("domain","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
+
+                if q_lower not in hay:
+                    continue
+
+            rows.append(row)
+
+        if cursor == 0:
+            break
+
+    # Sorting
+    reverse = (order.lower() != "asc")
+
+    if sort == "count_total":
+        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
+    elif sort == "status":
+        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
+        rows.sort(key=lambda x: (rank.get(x["status"], 99), x.get("last_seen") or ""), reverse=False)
+        if reverse:
+            rows.reverse()
+    elif sort == "listing_state":
+        rows.sort(key=lambda x: (x.get("listing_state") or "", x.get("last_seen") or ""), reverse=reverse)
+    elif sort == "vt_state":
+        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
+    else:
+        rows.sort(key=lambda x: x.get("last_seen") or "", reverse=reverse)
+
+    # Pagination
+    total = len(rows)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_rows = rows[start:end]
+
+    return templates.TemplateResponse(
+        "index_sysmon.html",
+        {
+            "request": request,
+            "tab": tab,
+            "rows": page_rows,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+
+            "status": status,
+            "q": q,
+            "sort": sort,
+            "order": order,
+
+            "triage": triage,
+            "listing_state": listing_state,
+
+            "indicator_label": indicator_label,
+            "indicator_field": indicator_field,
+
             "vt_enabled": vt_enabled(),
             **(await get_ui_metrics()),
         },

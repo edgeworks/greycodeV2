@@ -18,7 +18,7 @@
       <div class="metrics">
         <span><b>VT queue:</b> {{ vt_queue_len }}</span>
         <span><b>Staged candidates:</b> {{ staged_candidates }}</span>
-        <span><b>Known hashes:</b> {{ total_hashes }}</span>
+        <span><b>Known hashes:</b> {{ total_hashes or "-" }}</span>
       </div>
     </div>
   </header>

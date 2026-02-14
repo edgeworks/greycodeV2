@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="tabs">
+  <a href="/ui/sysmon/1" class="{% if tab == 1 %}active{% endif %}">Sysmon 1</a>
+  <a href="/ui/sysmon/3" class="{% if tab == 3 %}active{% endif %}">Sysmon 3</a>
+  <a href="/ui/sysmon/22" class="{% if tab == 22 %}active{% endif %}">Sysmon 22</a>
+</div>
+
+<form method="get" class="controls">
+  <label>Status:
+    <select name="status">
+      {% if tab == 1 %}
+        {% set statuses = ["ALL","RED","ERROR","GREY","GREEN"] %}
+      {% else %}
+        {% set statuses = ["ALL","RED","ERROR","GREY"] %}
+      {% endif %}
+      {% for s in statuses %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  {% if tab == 1 %}
+    <label>Triage:
+      <select name="triage">
+        {% for t in ["ALL","OPEN","TRIAGED"] %}
+          <option value="{{ t }}" {% if triage == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  {% endif %}
+
+  {% if tab in [3,22] %}
+    <label>Listing:
+      <select name="listing_state">
+        {% for ls in ["ALL","PENDING","NO_LISTING","LISTED"] %}
+          <option value="{{ ls }}" {% if listing_state == ls %}selected{% endif %}>{{ ls }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  {% endif %}
+
+  <label>Search:
+    <input type="text" name="q" value="{{ q }}" placeholder="{% if tab==1 %}sha256 / computer / path{% elif tab==3 %}ip / computer{% else %}domain / computer{% endif %}">
+  </label>
+
+  <label>Sort:
+    <select name="sort">
+      <option value="last_seen" {% if sort=="last_seen" %}selected{% endif %}>Last seen</option>
+      <option value="count_total" {% if sort=="count_total" %}selected{% endif %}>Count</option>
+      <option value="status" {% if sort=="status" %}selected{% endif %}>Status</option>
+
+      {% if tab == 1 %}
+        <option value="vt_state" {% if sort=="vt_state" %}selected{% endif %}>VT state</option>
+      {% else %}
+        <option value="listing_state" {% if sort=="listing_state" %}selected{% endif %}>Listing</option>
+      {% endif %}
+    </select>
+  </label>
+
+  <label>Order:
+    <select name="order">
+      <option value="desc" {% if order=="desc" %}selected{% endif %}>Desc</option>
+      <option value="asc" {% if order=="asc" %}selected{% endif %}>Asc</option>
+    </select>
+  </label>
+
+  <label>Page size:
+    <select name="page_size">
+      {% for ps in [50,100,200,500,1000] %}
+        <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <input type="hidden" name="page" value="1">
+  <button type="submit">Apply</button>
+
+  {% if tab == 1 %}
+    <span class="muted" style="margin-left:12px;">
+      <a href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open RED queue</a>
+    </span>
+  {% endif %}
+</form>
+
+<p><b>Results:</b> {{ total }} (showing {{ rows|length }})</p>
+
+<table>
+  <tr>
+    <th class="col-status">Status</th>
+
+    {% if tab in [3,22] %}
+      <th class="col-listing">Listing</th>
+    {% endif %}
+
+    <th class="col-count">Count</th>
+    <th class="col-lastseen">Last Seen</th>
+
+    {% if tab == 1 %}
+      <th class="col-computer">Computer</th>
+      <th class="col-image">Image</th>
+      <th class="col-indicator">SHA256</th>
+    {% elif tab == 3 %}
+      <th class="col-computer">Computer (first/last)</th>
+      <th class="col-indicator">DestinationIp</th>
+      <th class="col-source">Source</th>
+    {% else %}
+      <th class="col-computer">Computer (first/last)</th>
+      <th class="col-indicator">QueryName</th>
+      <th class="col-source">Source</th>
+    {% endif %}
+  </tr>
+
+  {% for row in rows %}
+    {# Row coloring can be done later via CSS classes; for now keep simple #}
+    {% set rowclass = row.status %}
+    {% if tab in [3,22] %}
+    {% if row.status == "ERROR" %}
+        {% set rowclass = "ROW_ERROR" %}
+    {% elif row.status == "RED" and row.listing_state == "LISTED" %}
+        {% set rowclass = "ROW_LISTED" %}
+    {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
+        {% set rowclass = "ROW_PENDING" %}
+    {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
+        {% set rowclass = "ROW_NOLISTING" %}
+    {% else %}
+        {% set rowclass = "ROW_OTHER" %}
+    {% endif %}
+    {% endif %}
+
+    <tr class="{{ rowclass }}">
+      <td class="col-status">
+        {{ row.status }}
+
+        {% if tab == 1 %}
+          {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
+            <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
+          {% endif %}
+
+          {% if row.disposition %}
+            {% if row.disposition == "ACCEPTED" %}
+              <span class="badge disp-accepted">ACCEPTED</span>
+            {% elif row.disposition == "ESCALATED" %}
+              <span class="badge disp-escalated" title="{% if row.ticket_id %}{{ row.ticket_id }}{% endif %}">ESCALATED</span>
+            {% else %}
+              <span class="badge disp-other">{{ row.disposition }}</span>
+            {% endif %}
+          {% endif %}
+
+          {% if row.status == "GREY" %}
+            {% if row.vt_state %}
+              <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+            {% else %}
+              <span class="badge vt-pending">PENDING</span>
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      </td>
+
+      {% if tab in [3,22] %}
+        <td class="col-listing">
+          {% if row.listing_state %}
+            <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+          {% else %}
+            -
+          {% endif %}
+        </td>
+      {% endif %}
+
+      <td class="col-count num">{{ row.count_total }}</td>
+      <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
+
+      {% if tab == 1 %}
+        <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+        <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+        <td class="col-indicator">
+          <a href="/ui/hash/{{ row.sha256 }}">{{ row.sha256[:9] }}…</a>
+          <span class="sep">|</span>
+          <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
+        </td>
+      {% elif tab == 3 %}
+        <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+          {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+        </td>
+        <td class="col-indicator mono">{{ row.ip }}</td>
+        <td class="col-source mono">{{ row.source or "-" }}</td>
+      {% else %}
+        <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+          {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+        </td>
+        <td class="col-indicator mono">{{ row.domain }}</td>
+        <td class="col-source mono">{{ row.source or "-" }}</td>
+      {% endif %}
+    </tr>
+  {% endfor %}
+</table>
+
+<div class="pager">
+  {% if page > 1 %}
+    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}
+      {% if tab==1 %}&triage={{triage}}{% endif %}
+      {% if tab in [3,22] %}&listing_state={{listing_state}}{% endif %}">
+      Prev
+    </a>
+  {% endif %}
+
+  <span>Page {{ page }}</span>
+
+  {% if page * page_size < total %}
+    <a href="?status={{status}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}
+      {% if tab==1 %}&triage={{triage}}{% endif %}
+      {% if tab in [3,22] %}&listing_state={{listing_state}}{% endif %}">
+      Next
+    </a>
+  {% endif %}
+</div>
+
+{% endblock %}
