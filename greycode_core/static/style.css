@@ -67,7 +67,7 @@ dd { margin: 0; color: #222; }
 .sep { color: #aaa; margin: 0 6px; }
 
 .tabs { display:flex; gap:8px; margin: 8px 0 14px; }
-.tabs a { padding: 6px 10px; border:1px solid #ccc; border-radius: 8px; text-decoration:none; color: inherit; }
+.tabs a { padding: 8px 12px; border:1px solid #ccc; border-radius: 8px; text-decoration:none; color: inherit; }
 .tabs a.active { font-weight:600; border-color:#888; }
 
 .badge.ls-pending { opacity: 0.9; }
