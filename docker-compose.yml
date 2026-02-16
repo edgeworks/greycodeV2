@@ -1,0 +1,135 @@
+version: '3.9'
+
+services:
+  redis:
+    image: redis:7
+    container_name: greycode-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfilename appendonly.aof
+      --dir /data
+
+  greycode-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PIP_PROXY: http://proxy.be.ch:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    volumes:
+      - ./greycode_core:/app
+    environment:
+      - HTTP_PROXY=http://proxy.be.ch:8080
+      - HTTPS_PROXY=http://proxy.be.ch:8080
+      - NO_PROXY=localhost,127.0.0.1,be.ch,172.16.0.0/16,10.0.0.0/8
+      - VT_ENABLED=1   # training: 0, enrichment: 1 -> set this in vt-worker and selector service as well, behaves like AND
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  vt-worker:
+    build:
+      context: .
+      dockerfile: vt_worker/Dockerfile
+      args:
+        PIP_PROXY: http://proxy.be.ch:8080
+    depends_on:
+      - redis
+    volumes:
+      - ./vt_worker:/app/vt_worker
+      - ./greycode_core:/app/greycode_core
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VT_ENABLED=1   # training: 0, enrichment: 1 -> set this in greycode-core and selector service as well, behaves like AND
+      - VT_API_KEY=bff0eb73729069ea08c434a5713a44a8cd6a54e6c447bfd129ce679abdeb31d1
+      - HTTP_PROXY=http://proxy.be.ch:8080
+      - HTTPS_PROXY=http://proxy.be.ch:8080
+      - NO_PROXY=localhost,127.0.0.1,be.ch,172.16.0.0/16,10.0.0.0/8
+      - VT_RATE_LIMIT_PER_MINUTE=3
+      - VT_RETRY_SECONDS_429=120
+      - ALERT_EMAIL_ENABLED=1
+      - ALERT_SMTP_HOST=mailhub.police.be.ch
+      - ALERT_SMTP_PORT=25
+      - ALERT_EMAIL_FROM=greycode@police.be.ch
+      - ALERT_EMAIL_TO=soc@police.be.ch
+      - ALERT_EMAIL_SUBJECT_PREFIX=[Greycode]
+      # optional:
+      - ALERT_SMTP_STARTTLS=0
+      - ALERT_SMTP_USER=
+      - ALERT_SMTP_PASS=
+      # optional but very useful for click-through:
+      - GREYCODE_UI_BASE_URL=http://k3003apl050tmmo:8000/
+
+  updater:
+    build:
+      context: .
+      dockerfile: updater/Dockerfile
+      args:
+        PIP_PROXY: http://proxy.be.ch:8080
+    depends_on:
+      - redis
+    volumes:
+      - ./updater:/app
+    environment:
+      - HTTP_PROXY=http://proxy.be.ch:8080
+      - HTTPS_PROXY=http://proxy.be.ch:8080
+      - NO_PROXY=localhost,127.0.0.1,be.ch,172.16.0.0/16,10.0.0.0/8
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - BLACKLIST_REFRESH_SECONDS=900
+      - BLACKLIST_PROCESS_INTERVAL_SECONDS=5
+      - BLACKLIST_BATCH=500
+      - THREATFOX_REFRESH_SECONDS=300
+      # - FEODO_IPBLOCKLIST_URL=...
+      # - THREATFOX_DOMAIN_URL=...
+  
+  selector:
+    build:
+      context: .
+      dockerfile: selector/Dockerfile
+      args:
+        PIP_PROXY: http://proxy.be.ch:8080
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VT_ENABLED=1 # training: 0, enrichment: 1 -> set this in greycode-core and vt-worker service as well, behaves like AND
+      - RARE_MAX=3
+      - MIN_AGE_SECONDS=600
+      - VT_BUDGET_24H=500
+      - COMMON_SHARE_NUM=1
+      - COMMON_SHARE_DEN=10
+      - SELECTOR_INTERVAL_SECONDS=10
+      - CANDIDATE_BATCH=50
+      - ENQUEUE_PER_TICK=25
+      - VT_QUEUE_LEASE_SECONDS=3600
+    depends_on:
+      - redis
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: greycode-nginx
+    depends_on:
+      - greycode-core
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/auth:/etc/nginx/auth:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /var/lib/greycode/redis
