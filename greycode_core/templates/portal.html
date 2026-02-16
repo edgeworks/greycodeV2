@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Greycode</title>
+  <link rel="stylesheet" href="/site/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="card header">
+      <div class="brand">
+        <img class="logo" src="/site/greycode-logo.png" alt="Greycode logo" />
+        <div class="title">
+          <h1>Greycode</h1>
+          <p>Sysmon Threat Enrichment Portal</p>
+        </div>
+      </div>
+
+      <div class="chips">
+        <span class="chip">Authenticated</span>
+        <span class="chip">TLS (internal)</span>
+        <span class="chip">FastAPI + Redis</span>
+      </div>
+
+      <form method="post" action="/logout" style="margin-top:12px;">
+        <button class="btn" type="submit">Logout</button>
+      </form>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>UI</h2>
+        <p>Analyst views for Sysmon 1 / 3 / 22 with status and workflow filters.</p>
+        <div class="actions">
+          <a class="btn primary" href="/ui/sysmon/1">Open UI</a>
+          <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc">Open RED queue</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>API</h2>
+        <p>Ingest endpoints are intentionally unauthenticated (expected: Cribl).</p>
+        <ul class="list">
+          <li><code>POST /enrich/process</code></li>
+          <li><code>POST /enrich/network/bulk</code></li>
+          <li><code>POST /enrich/dns/bulk</code></li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Operational notes</h2>
+        <p class="muted">
+          Form login protects the portal + UI. API routes remain open. Use TLS (self-signed for now,
+          replace with internal cert later).
+        </p>
+        <div class="actions">
+          <a class="btn" href="/health">Health (nginx)</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span class="muted">Greycode • internal service</span>
+    </footer>
+  </div>
+</body>
+</html>

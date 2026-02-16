@@ -1,6 +1,7 @@
 from hashlib import sha256
 from fastapi import FastAPI
 from fastapi import Path as ApiPath
+from fastapi import Depends
 from fastapi import Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -9,6 +10,9 @@ from fastapi import Query
 from fastapi import Form
 from pathlib import Path
 from pydantic import BaseModel, ValidationError
+from starlette.middleware.sessions import SessionMiddleware
+from passlib.context import CryptContext
+import secrets
 import redis.asyncio as redis
 import uuid
 import datetime
@@ -23,12 +27,31 @@ from typing import Optional
 app = FastAPI(title="Greycode API")
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.mount("/site", StaticFiles(directory=str(BASE_DIR / "static_site")), name="site")
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 templates = Jinja2Templates(directory="templates")
 STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
 STAGED_SET_IP = "greycode:staged:ip_candidates"
 STAGED_SET_DOMAIN = "greycode:staged:domain_candidates"
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("GREYCODE_SESSION_SECRET", ""),
+    https_only=True,
+    same_site="lax",
+)
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+UI_USER = os.getenv("GREYCODE_UI_USER", "greycode")
+UI_PASS_HASH = os.getenv("GREYCODE_UI_PASS_HASH", "")
+
+def require_login(request: Request):
+    if request.session.get("logged_in") is True:
+        return True
+    # Redirect to login page
+    raise HTTPException(status_code=303, headers={"Location": "/login"})
 
 async def get_ui_metrics():
     vt_queue_len = await r.llen(VT_QUEUE)
@@ -155,6 +178,43 @@ async def clear_disposition(sha256: str, actor: str = "ui") -> None:
         },
     )
 
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, err: str = ""):
+    return templates.TemplateResponse("login.html", {"request": request, "err": err})
+
+
+@app.post("/login")
+async def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    if not os.getenv("GREYCODE_SESSION_SECRET"):
+        return JSONResponse({"detail": "GREYCODE_SESSION_SECRET not set"}, status_code=503)
+    if not UI_PASS_HASH:
+        return JSONResponse({"detail": "GREYCODE_UI_PASS_HASH not set"}, status_code=503)
+
+    user_ok = secrets.compare_digest((username or "").strip(), UI_USER)
+    pass_ok = pwd_context.verify(password or "", UI_PASS_HASH)
+
+    if not (user_ok and pass_ok):
+        return RedirectResponse(url="/login?err=1", status_code=303)
+
+    request.session["logged_in"] = True
+    request.session["user"] = UI_USER
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=303)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def portal(request: Request, _auth=Depends(require_login)):
+    return templates.TemplateResponse("portal.html", {"request": request})
 
 
 @app.post("/enrich/process")
@@ -589,12 +649,12 @@ async def enrich_dns_bulk(request: Request):
     )
 
 @app.post("/ui/hash/{sha256}/accept")
-async def ui_hash_accept(sha256: str):
+async def ui_hash_accept(sha256: str, _auth=Depends(require_login)):
     await set_disposition(sha256, "ACCEPTED", actor="ui")
     return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
 
 @app.post("/ui/hash/{sha256}/escalate")
-async def ui_hash_escalate(sha256: str, ticket_id: str = Form(...)):
+async def ui_hash_escalate(sha256: str, ticket_id: str = Form(...), _auth=Depends(require_login)):
     ticket_id = (ticket_id or "").strip()
     if not ticket_id:
         # Redirect back if no ticket_id provided
@@ -604,17 +664,17 @@ async def ui_hash_escalate(sha256: str, ticket_id: str = Form(...)):
     return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
 
 @app.post("/ui/hash/{sha256}/clear")
-async def ui_hash_clear(sha256: str):
+async def ui_hash_clear(sha256: str, _auth=Depends(require_login)):
     await clear_disposition(sha256, actor="ui")
     return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
 
 @app.post("/ui/hash/{sha256}/recheck")
-async def ui_hash_recheck(sha256: str):
+async def ui_hash_recheck(sha256: str, _auth=Depends(require_login)):
     await recheck_vt_stage(sha256)
     return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
 
 @app.post("/ui/hash/{sha256}/delete")
-async def ui_hash_delete(sha256: str):
+async def ui_hash_delete(sha256: str, _auth=Depends(require_login)):
     await delete_hash_everywhere(sha256)
     return RedirectResponse(url="/ui", status_code=303)
 
@@ -623,6 +683,7 @@ async def ui_bulk_action(
     action: str = Form(...),
     selected: list[str] = Form(default=[]),
     ticket_id: str = Form(default=""),
+    _auth=Depends(require_login),
 ):
     action = (action or "").strip().lower()
     ticket_id = (ticket_id or "").strip()
@@ -665,7 +726,7 @@ async def ui_bulk_action(
 
 
 @app.get("/status/{sha256}")
-async def get_status(sha256: str):
+async def get_status(sha256: str, _auth=Depends(require_login)):
     """
     Return the current status for a specific SHA-256 hash.
     """
@@ -684,7 +745,7 @@ async def get_status(sha256: str):
     }
 
 @app.get("/status/ip/{ip}")
-async def get_status_ip(ip: str):
+async def get_status_ip(ip: str, _auth=Depends(require_login)):
     try:
         ip_norm = normalize_ip(ip)
     except ValueError:
@@ -698,7 +759,7 @@ async def get_status_ip(ip: str):
 
 
 @app.get("/status/domain/{domain}")
-async def get_status_domain(domain: str):
+async def get_status_domain(domain: str, _auth=Depends(require_login)):
     dom = normalize_domain(domain)
     if not dom:
         raise HTTPException(status_code=400, detail="Invalid domain")
@@ -713,6 +774,7 @@ async def get_status_domain(domain: str):
 async def list_hashes(
     status: Optional[str] = None,
     limit: int = 100,
+    _auth=Depends(require_login),
 ):
     """
     List known hashes.
@@ -873,6 +935,7 @@ async def ui_sysmon(
 
     # Sysmon 3/22 specific
     listing_state: str = Query("ALL"),  # ALL | PENDING | NO_LISTING | LISTED (only used for 3/22)
+    _auth=Depends(require_login),
 ):
     tab = int(event_id)
 
@@ -1027,7 +1090,7 @@ async def ui_sysmon(
 
 
 @app.get("/ui/hash/{sha256}", response_class=HTMLResponse)
-async def ui_hash_detail(request: Request, sha256: str):
+async def ui_hash_detail(request: Request, sha256: str, _auth=Depends(require_login)):
     key = f"greycode:sha256:{sha256}"
     data = await r.hgetall(key)
     data["vt_last_checked_fmt"] = fmt_epoch(data.get("vt_last_checked"))

@@ -1,0 +1,27 @@
+.loginform {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+  max-width: 520px;
+}
+
+.loginform label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.loginform input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.20);
+  color: var(--text);
+  outline: none;
+}
+
+.loginform input:focus {
+  border-color: rgba(255,255,255,0.28);
+  filter: brightness(1.05);
+}

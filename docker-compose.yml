@@ -31,6 +31,9 @@ services:
       - HTTPS_PROXY=http://proxy.be.ch:8080
       - NO_PROXY=localhost,127.0.0.1,be.ch,172.16.0.0/16,10.0.0.0/8
       - VT_ENABLED=1   # training: 0, enrichment: 1 -> set this in vt-worker and selector service as well, behaves like AND
+      - GREYCODE_UI_USER=greycode
+      - GREYCODE_UI_PASS_HASH=$2b$12$...
+      - GREYCODE_SESSION_SECRET=replace_with_long_random_string
     command: uvicorn main:app --host 0.0.0.0 --port 8000
 
   vt-worker:
