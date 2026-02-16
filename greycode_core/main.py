@@ -11,7 +11,6 @@ from fastapi import Form
 from pathlib import Path
 from pydantic import BaseModel, ValidationError
 from starlette.middleware.sessions import SessionMiddleware
-from passlib.context import CryptContext
 import secrets
 import redis.asyncio as redis
 import uuid
@@ -38,14 +37,15 @@ VT_QUEUE = "greycode:queue:vt"
 STAGED_SET_IP = "greycode:staged:ip_candidates"
 STAGED_SET_DOMAIN = "greycode:staged:domain_candidates"
 
+if not os.getenv("GREYCODE_SESSION_SECRET"):
+    raise RuntimeError("GREYCODE_SESSION_SECRET must be set")
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("GREYCODE_SESSION_SECRET", ""),
     https_only=True,
     same_site="lax",
 )
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 UI_USER = os.getenv("GREYCODE_UI_USER", "greycode")
 UI_PASS = os.getenv("GREYCODE_UI_PASS", "")
