@@ -20,6 +20,9 @@ import ipaddress
 import json
 import os
 import time
+import base64
+import hashlib
+import hmac
 from typing import Optional
 
 
@@ -45,13 +48,45 @@ app.add_middleware(
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 UI_USER = os.getenv("GREYCODE_UI_USER", "greycode")
-UI_PASS_HASH = os.getenv("GREYCODE_UI_PASS_HASH", "")
+UI_PASS = os.getenv("GREYCODE_UI_PASS", "")
 
 def require_login(request: Request):
     if request.session.get("logged_in") is True:
         return True
     # Redirect to login page
     raise HTTPException(status_code=303, headers={"Location": "/login"})
+
+def pbkdf2_hash(password: str, *, iterations: int = 310_000, salt_bytes: int = 16) -> str:
+    """
+    Returns: pbkdf2_sha256$<iterations>$<salt_b64>$<dk_b64>
+    """
+    salt = secrets.token_bytes(salt_bytes)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return "pbkdf2_sha256${}${}${}".format(
+        iterations,
+        base64.urlsafe_b64encode(salt).decode("ascii").rstrip("="),
+        base64.urlsafe_b64encode(dk).decode("ascii").rstrip("="),
+    )
+
+def pbkdf2_verify(password: str, encoded: str) -> bool:
+    try:
+        scheme, it_s, salt_b64, dk_b64 = encoded.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        iterations = int(it_s)
+
+        # restore padding
+        def unb64(s: str) -> bytes:
+            pad = "=" * (-len(s) % 4)
+            return base64.urlsafe_b64decode(s + pad)
+
+        salt = unb64(salt_b64)
+        dk_expected = unb64(dk_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(dk, dk_expected)
+    except Exception:
+        return False
+
 
 async def get_ui_metrics():
     vt_queue_len = await r.llen(VT_QUEUE)
@@ -192,11 +227,11 @@ async def login_submit(
 ):
     if not os.getenv("GREYCODE_SESSION_SECRET"):
         return JSONResponse({"detail": "GREYCODE_SESSION_SECRET not set"}, status_code=503)
-    if not UI_PASS_HASH:
-        return JSONResponse({"detail": "GREYCODE_UI_PASS_HASH not set"}, status_code=503)
+    if not UI_PASS:
+        return JSONResponse({"detail": "GREYCODE_UI_PASS not set"}, status_code=503)
 
     user_ok = secrets.compare_digest((username or "").strip(), UI_USER)
-    pass_ok = pwd_context.verify(password or "", UI_PASS_HASH)
+    pass_ok = pbkdf2_verify(password or "", UI_PASS)
 
     if not (user_ok and pass_ok):
         return RedirectResponse(url="/login?err=1", status_code=303)
