@@ -1,124 +1,287 @@
-body { font-family: sans-serif; margin: 20px; }
-header { margin-bottom: 20px; }
+/* ------------------------------------------------------------
+   Greycode Ops UI Add-on (pairs with /site/style.css)
+   Goals:
+   - No global overrides (do not touch body, html, a, header, .card)
+   - Make tables readable on dark glass UI
+   - Use subtle state markers (borders), not full-row fills
+   ------------------------------------------------------------ */
 
-.GREEN { background-color: #e6ffe6; }
-.GREY  { background-color: #f0f0f0; }
-.RED   { background-color: #ffe6e6; }
-
-/* --- Sysmon 3/22 row semantics --- */
-.ROW_PENDING { background-color: #f0f0f0; }   /* grey */
-.ROW_NOLISTING { background-color: #ffffff; } /* white */
-.ROW_LISTED { background-color: #ffe6e6; }    /* red */
-.ROW_ERROR { background-color: #fff3cd; }     /* orange/yellow */
-.ROW_OTHER { background-color: #ffffff; }
-
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-th, td { padding: 6px 10px; border-bottom: 1px solid #ccc; vertical-align: top; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.col-sel { width: 32px; }
-.col-status { width: 190px; }
-.col-count { width: 80px; }
-.col-lastseen { width: 210px; }
-.col-computer { width: 190px; }
-.col-sha { width: 155px; }
-/* Let Image take remaining space */
-.col-image { width: auto; }
-
-td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-td[title] { cursor: help; }
-
-.bulkbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 10px 0 12px; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
-.bulkitem { display: inline-flex; gap: 6px; align-items: center; }
-
-a { text-decoration: none; }
-
-.statusbar { margin: 10px 0 20px; }
-.metrics { margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
-.metrics span { background: #f7f7f7; border: 1px solid #ddd; padding: 6px 10px; border-radius: 6px; }
-
-.banner { padding: 8px 12px; border-radius: 6px; margin: 10px 0 20px; }
-.banner.enabled { background: #e6ffe6; border: 1px solid #7fd27f; }
-.banner.disabled { background: #fff3cd; border: 1px solid #e0c36a; }
-
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+/* --------- Generic helpers --------- */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-
-.controls { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0 15px; align-items: end; }
-.controls label { display: flex; flex-direction: column; font-size: 0.9rem; }
-.controls input, .controls select { padding: 6px 8px; }
-.pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; }
-
-.detail-header { margin-bottom: 16px; }
-.detail-header .big { font-size: 0.95rem; margin-top: 4px; }
-.detail-badges { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-
-.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
-.card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; }
-.card h3 { margin: 0 0 10px 0; font-size: 1rem; }
-
-dl { display: grid; grid-template-columns: 160px 1fr; gap: 6px 10px; margin: 0; }
-dt { font-weight: 600; color: #333; }
-dd { margin: 0; color: #222; }
-
+.sep { color: rgba(255,255,255,0.35); margin: 0 6px; }
 .wrap { white-space: normal; word-break: break-word; }
 
-.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.8rem; border: 1px solid #ccc; }
-.muted { color: #777; }
-.sep { color: #aaa; margin: 0 6px; }
-
-.tabs { display:flex; gap:8px; margin: 8px 0 14px; }
-.tabs a { padding: 8px 12px; border:1px solid #ccc; border-radius: 8px; text-decoration:none; color: inherit; }
-.tabs a.active { font-weight:600; border-color:#888; }
-
-.badge.ls-pending { opacity: 0.9; }
-.badge.ls-no_listing { opacity: 0.9; }
-.badge.ls-listed { font-weight: 700; }
-
-.badge.status-green { background: #e6ffe6; border-color: #7fd27f; }
-.badge.status-red { background: #ffe6e6; border-color: #d27f7f; }
-.badge.status-grey { background: #f0f0f0; border-color: #bbb; }
-.badge.status-error { background: #fff3cd; border-color: #e0c36a; }
-
-.badge.vt-pending { background: #f0f0f0; border-color: #bbb; }
-.badge.vt-not_found { background: #eef6ff; border-color: #8bbcff; }
-.badge.vt-rate_limited { background: #fff3cd; border-color: #e0c36a; }
-.badge.vt-found { background: #e6ffe6; border-color: #7fd27f; }
-.badge.vt-error { background: #ffe6e6; border-color: #d27f7f; }
-
-.badge.disp-accepted { background: #eef6ff; border-color: #8bbcff; font-weight: 600; }
-.badge.disp-escalated { background: #fff3cd; border-color: #e0c36a; font-weight: 600; }
-.badge.disp-other { background: #f0f0f0; border-color: #bbb; font-weight: 600; }
-
-.col-toggles { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.col-toggles label { display: inline-flex; gap: 6px; align-items: center; font-size: 0.9rem; }
-
-.badge.vtred {
-  background: #ffe6e6;
-  border: 1px solid #d27f7f;
+/* --------- Tabs (reuse site look) --------- */
+.tabs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tabs a {
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text);
+  text-decoration: none;
   font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.92rem;
+}
+.tabs a:hover { filter: brightness(1.06); }
+.tabs a.active {
+  background: linear-gradient(135deg, rgba(110,168,255,0.35), rgba(255,110,195,0.25));
+  border-color: rgba(255,255,255,0.22);
 }
 
-/* Layout: table + drawer */
-.ops-layout { display: grid; grid-template-columns: 1fr 420px; gap: 12px; align-items: start; }
-@media (max-width: 1100px) { .ops-layout { grid-template-columns: 1fr; } }
+/* --------- Ops page layout: table + drawer --------- */
+.ops-layout {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .ops-layout { grid-template-columns: 1fr; }
+}
 
-.drawer { position: sticky; top: 14px; }
-.drawer .card { min-height: 120px; }
-.drawer-empty { color: #777; }
+.drawer {
+  position: sticky;
+  top: 14px;
+}
+.drawer-empty { color: var(--muted); }
 
-th.sortable a { color: inherit; text-decoration: none; display: inline-flex; gap: 6px; align-items: center; }
+/* Drawer content spacing */
+.detail-badges { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+dl { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; margin: 0; }
+dt { font-weight: 700; color: rgba(255,255,255,0.85); }
+dd { margin: 0; color: rgba(255,255,255,0.92); }
+
+/* --------- Controls bar (filters/search) --------- */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin: 10px 0 14px;
+}
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+/* Inputs/selects consistent with /site/style.css login inputs */
+.controls input[type="text"],
+.controls select {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.20);
+  color: var(--text);
+  outline: none;
+  min-width: 140px;
+}
+.controls input[type="text"] { min-width: 260px; }
+.controls input[type="text"]:focus,
+.controls select:focus {
+  border-color: rgba(255,255,255,0.28);
+  filter: brightness(1.05);
+}
+
+/* If your template still uses a plain <button>, make it match .btn */
+.controls button {
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+.controls button:hover { filter: brightness(1.06); }
+
+/* Pager */
+.pager {
+  margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: var(--muted);
+}
+.pager a {
+  color: var(--text);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+.pager a:hover { filter: brightness(1.06); }
+
+/* --------- Table styling (dark glass friendly) --------- */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.18);
+}
+
+/* header */
+th {
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 800;
+  font-size: 0.92rem;
+  color: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* cells */
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255,255,255,0.92);
+}
+tr:last-child td { border-bottom: none; }
+
+td[title] { cursor: help; }
+
+/* column widths you already rely on */
+.col-sel { width: 32px; }
+.col-status { width: 190px; }
+.col-listing { width: 140px; }
+.col-count { width: 90px; }
+.col-lastseen { width: 210px; }
+.col-computer { width: 260px; }
+.col-sha { width: 170px; }
+.col-indicator { width: 220px; }
+.col-source { width: 180px; }
+.col-image { width: auto; }
+
+/* links inside table */
+table a {
+  color: rgba(255,255,255,0.92);
+  text-decoration: none;
+}
+table a:hover { text-decoration: underline; }
+
+/* Hover and clickable rows */
+tr.clickable { cursor: pointer; }
+tbody tr:hover { background: rgba(255,255,255,0.04); }
+tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.10); outline-offset: -1px; }
+
+/* Sorting link styling */
+th.sortable a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
 th.sortable a:hover { text-decoration: underline; }
 .sort-ind { font-size: 0.85em; opacity: 0.75; }
 
-tr.clickable { cursor: pointer; }
-tr.clickable:hover { outline: 1px solid #ddd; }
+/* --------- Row semantics (use left border, not full fill) --------- */
+/* Default: no border */
+tbody tr { border-left: 0; }
 
-/* Your row state colors for 3/22 */
-.ROW_ERROR { background-color: #fff3cd; }
-.ROW_LISTED { background-color: #ffe6e6; }
-.ROW_PENDING { background-color: #f0f0f0; }
-.ROW_NOLISTING { background-color: #ffffff; }
-.ROW_OTHER { background-color: #ffffff; }
+/* Sysmon 3/22 state rules from your spec:
+   - PENDING => grey
+   - NO_LISTING => white/neutral
+   - LISTED => red
+   - ERROR => orange/yellow
+*/
+.ROW_PENDING   { box-shadow: inset 6px 0 0 rgba(255,255,255,0.35); }
+.ROW_NOLISTING { box-shadow: inset 6px 0 0 rgba(255,255,255,0.16); }
+.ROW_LISTED    { box-shadow: inset 6px 0 0 rgba(255,120,120,0.55); }
+.ROW_ERROR     { box-shadow: inset 6px 0 0 rgba(255,210,120,0.65); }
+.ROW_OTHER     { box-shadow: inset 6px 0 0 rgba(255,255,255,0.16); }
+
+/* Optional: very subtle hover tints to reinforce */
+.ROW_LISTED:hover  { background: rgba(255,110,110,0.08) !important; }
+.ROW_ERROR:hover   { background: rgba(255,210,110,0.08) !important; }
+.ROW_PENDING:hover { background: rgba(255,255,255,0.06) !important; }
+
+/* --------- Badges --------- */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.18);
+  color: rgba(255,255,255,0.90);
+  vertical-align: middle;
+}
+
+/* listing badges */
+.badge.ls-pending { opacity: 0.95; }
+.badge.ls-no_listing { opacity: 0.95; }
+.badge.ls-listed { font-weight: 800; }
+
+/* disposition */
+.badge.disp-accepted { background: rgba(110,168,255,0.18); border-color: rgba(110,168,255,0.30); font-weight: 800; }
+.badge.disp-escalated { background: rgba(255,210,110,0.18); border-color: rgba(255,210,110,0.30); font-weight: 800; }
+.badge.disp-other { background: rgba(255,255,255,0.08); border-color: var(--border); font-weight: 800; }
+
+/* VT states */
+.badge.vt-pending { background: rgba(255,255,255,0.08); }
+.badge.vt-not_found { background: rgba(110,168,255,0.14); border-color: rgba(110,168,255,0.30); }
+.badge.vt-rate_limited { background: rgba(255,210,110,0.18); border-color: rgba(255,210,110,0.30); }
+.badge.vt-found { background: rgba(130,255,170,0.12); border-color: rgba(130,255,170,0.22); }
+.badge.vt-error { background: rgba(255,120,120,0.14); border-color: rgba(255,120,120,0.26); }
+
+.badge.vtred {
+  background: rgba(255,120,120,0.16);
+  border-color: rgba(255,120,120,0.30);
+  font-weight: 900;
+}
+
+/* --------- Bulk bar + column toggles (if used later) --------- */
+.bulkbar, .col-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(0,0,0,0.18);
+  color: var(--muted);
+}
+.bulkitem, .col-toggles label { display: inline-flex; gap: 8px; align-items: center; }
+.bulkbar input[type="text"] {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.20);
+  color: var(--text);
+}
+
+/* --------- (Optional) make legacy GREEN/GREY/RED classes non-destructive ---------
+   If any old template still uses these classes for <tr class="RED"> etc.,
+   keep them readable, but do NOT paint the whole row.
+*/
+.GREEN, .GREY, .RED {
+  box-shadow: inset 6px 0 0 rgba(255,255,255,0.16);
+}
+.RED { box-shadow: inset 6px 0 0 rgba(255,120,120,0.55); }
