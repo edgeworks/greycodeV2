@@ -51,6 +51,24 @@
     </main>
   </div>
 
-  {% block scripts %}{% endblock %}
+  <div id="drawerBackdrop" class="drawer-backdrop"></div>
+
+  {% block scripts %}
+  <script>
+    // Open drawer when HTMX swaps content into it.
+    document.body.addEventListener("htmx:afterSwap", function (evt) {
+        if (evt.target && evt.target.classList && evt.target.classList.contains("drawer")) {
+        document.body.classList.add("drawer-open");
+        }
+    });
+
+    // Close when clicking backdrop
+    document.getElementById("drawerBackdrop")?.addEventListener("click", function () {
+        document.body.classList.remove("drawer-open");
+        // Optional: clear drawer content if you want it empty when closed:
+        // document.querySelector(".drawer")?.replaceChildren();
+    });
+  </script>
+  {% endblock %}
 </body>
 </html>

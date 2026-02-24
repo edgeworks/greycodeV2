@@ -1,82 +1,55 @@
-/* ------------------------------------------------------------
-   Greycode Ops UI Add-on (pairs with /site/style.css)
-   Goals:
-   - No global overrides (do not touch body, html, a, header, .card)
-   - Make tables readable on dark glass UI
-   - Use subtle state markers (borders), not full-row fills
-   ------------------------------------------------------------ */
+/* /static/style.css — ops UI overrides + drawer */
 
-/* --------- Generic helpers --------- */
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-.sep { color: rgba(255,255,255,0.35); margin: 0 6px; }
-.wrap { white-space: normal; word-break: break-word; }
+/* -----------------------------
+   Layout / width overrides
+   ----------------------------- */
 
-/* --------- Tabs (reuse site look) --------- */
-.tabs {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+/* /site/style.css caps .wrap at 1050px — override for ops pages */
+.wrap {
+  max-width: 1400px;          /* use more screen */
+  width: min(1400px, 100%);
 }
-.tabs a {
-  padding: 8px 12px;
-  border-radius: 12px;
+
+/* Make sure ops pages don't inherit old "body margin:20px" */
+body { margin: 0; }
+
+/* A “content card” helper (matches /site/.card but used in ops templates too) */
+.ops-card {
+  background: var(--card);
   border: 1px solid var(--border);
-  background: var(--card2);
-  color: var(--text);
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 0.92rem;
-}
-.tabs a:hover { filter: brightness(1.06); }
-.tabs a.active {
-  background: linear-gradient(135deg, rgba(110,168,255,0.35), rgba(255,110,195,0.25));
-  border-color: rgba(255,255,255,0.22);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  padding: 16px;
 }
 
-/* --------- Ops page layout: table + drawer --------- */
+/* Table + drawer container.
+   IMPORTANT: table should be full width; drawer overlays, so layout is 1 column. */
 .ops-layout {
-  display: grid;
-  grid-template-columns: 1fr 420px;
-  gap: 14px;
-  align-items: start;
-}
-@media (max-width: 1100px) {
-  .ops-layout { grid-template-columns: 1fr; }
+  display: block;
 }
 
-.drawer {
-  position: sticky;
-  top: 14px;
-}
-.drawer-empty { color: var(--muted); }
-
-/* Drawer content spacing */
-.detail-badges { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
-dl { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; margin: 0; }
-dt { font-weight: 700; color: rgba(255,255,255,0.85); }
-dd { margin: 0; color: rgba(255,255,255,0.92); }
-
-/* --------- Controls bar (filters/search) --------- */
+/* -----------------------------
+   Controls (filters row)
+   ----------------------------- */
 .controls {
   display: flex;
+  gap: 12px;
   flex-wrap: wrap;
-  gap: 10px;
   align-items: end;
-  margin: 10px 0 14px;
+  margin: 0 0 12px 0;
 }
+
 .controls label {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   color: var(--muted);
+  min-width: 160px;
 }
 
-/* Inputs/selects consistent with /site/style.css login inputs */
-.controls input[type="text"],
+.controls input,
 .controls select {
   padding: 10px 12px;
   border-radius: 12px;
@@ -84,28 +57,194 @@ dd { margin: 0; color: rgba(255,255,255,0.92); }
   background: rgba(0,0,0,0.20);
   color: var(--text);
   outline: none;
-  min-width: 140px;
 }
-.controls input[type="text"] { min-width: 260px; }
-.controls input[type="text"]:focus,
+
+.controls input:focus,
 .controls select:focus {
   border-color: rgba(255,255,255,0.28);
-  filter: brightness(1.05);
+  filter: brightness(1.06);
 }
 
-/* If your template still uses a plain <button>, make it match .btn */
-.controls button {
-  padding: 9px 12px;
-  border-radius: 12px;
+/* Buttons (reuse .btn from /site, but ensure consistency on ops pages) */
+button.btn {
+  appearance: none;
+}
+
+/* -----------------------------
+   Table styling (dark)
+   ----------------------------- */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  overflow: hidden;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  background: var(--card2);
-  color: var(--text);
-  font-weight: 700;
-  cursor: pointer;
+  background: rgba(0,0,0,0.12);
 }
-.controls button:hover { filter: brightness(1.06); }
 
-/* Pager */
+th, td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+th {
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.04);
+}
+
+tr:last-child td { border-bottom: 0; }
+
+td.mono, .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* clickable rows */
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td {
+  background: rgba(255,255,255,0.04);
+}
+
+/* Column widths (tune as needed) */
+.col-sel { width: 34px; }
+.col-status { width: 170px; }
+.col-listing { width: 140px; }
+.col-count { width: 90px; }
+.col-lastseen { width: 190px; }
+.col-computer { width: 220px; }
+.col-sha, .col-indicator { width: 170px; }
+.col-source { width: 160px; }
+.col-image { width: auto; }
+
+/* Links */
+a { color: rgba(160,200,255,0.95); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.sep { color: rgba(255,255,255,0.25); margin: 0 6px; }
+
+/* -----------------------------
+   Badges (dark)
+   ----------------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.86);
+}
+
+/* VT / disposition badges */
+.badge.vtred {
+  background: rgba(255,110,110,0.16);
+  border-color: rgba(255,110,110,0.35);
+  font-weight: 800;
+}
+
+.badge.disp-accepted {
+  background: rgba(110,168,255,0.14);
+  border-color: rgba(110,168,255,0.32);
+  font-weight: 700;
+}
+.badge.disp-escalated {
+  background: rgba(255,210,110,0.14);
+  border-color: rgba(255,210,110,0.32);
+  font-weight: 700;
+}
+.badge.disp-other {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.18);
+  font-weight: 700;
+}
+
+/* Listing state badges */
+.badge.ls-pending {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.18);
+  opacity: 0.95;
+}
+.badge.ls-no_listing {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.14);
+  opacity: 0.95;
+}
+.badge.ls-listed {
+  background: rgba(255,110,110,0.14);
+  border-color: rgba(255,110,110,0.34);
+  font-weight: 800;
+}
+
+/* VT state badges */
+.badge.vt-pending { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.18); }
+.badge.vt-not_found { background: rgba(110,168,255,0.12); border-color: rgba(110,168,255,0.28); }
+.badge.vt-rate_limited { background: rgba(255,210,110,0.12); border-color: rgba(255,210,110,0.28); }
+.badge.vt-found { background: rgba(120,255,170,0.10); border-color: rgba(120,255,170,0.26); }
+.badge.vt-error { background: rgba(255,110,110,0.12); border-color: rgba(255,110,110,0.28); }
+
+/* -----------------------------
+   Row semantics (Sysmon 3/22)
+   You wanted:
+   - GREY + PENDING => grey
+   - GREY + NO_LISTING => white
+   - RED + LISTED => red
+   - ERROR => orange
+   In dark theme we use tinted backgrounds.
+   ----------------------------- */
+
+.ROW_PENDING td {
+  background: rgba(255,255,255,0.05);
+}
+.ROW_NOLISTING td {
+  background: rgba(255,255,255,0.02);
+}
+.ROW_LISTED td {
+  background: rgba(255,110,110,0.10);
+}
+.ROW_ERROR td {
+  background: rgba(255,210,110,0.10);
+}
+.ROW_OTHER td {
+  background: rgba(255,255,255,0.02);
+}
+
+/* Keep legacy Sysmon 1 row classes if any templates still use them */
+.GREEN td { background: rgba(120,255,170,0.10); }
+.GREY  td { background: rgba(255,255,255,0.05); }
+.RED   td { background: rgba(255,110,110,0.10); }
+
+/* -----------------------------
+   Sortable headers
+   ----------------------------- */
+th.sortable a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+th.sortable a:hover { text-decoration: underline; }
+.sort-ind { font-size: 0.85em; opacity: 0.70; }
+
+/* -----------------------------
+   Pager
+   ----------------------------- */
 .pager {
   margin-top: 12px;
   display: flex;
@@ -113,175 +252,65 @@ dd { margin: 0; color: rgba(255,255,255,0.92); }
   align-items: center;
   color: var(--muted);
 }
-.pager a {
-  color: var(--text);
-  text-decoration: none;
-  border: 1px solid var(--border);
-  background: var(--card2);
-  padding: 6px 10px;
-  border-radius: 12px;
-}
-.pager a:hover { filter: brightness(1.06); }
 
-/* --------- Table styling (dark glass friendly) --------- */
-table {
+/* -----------------------------
+   Drawer overlay (the important part)
+   ----------------------------- */
+
+/* Backdrop element (you'll add <div id="drawerBackdrop" class="drawer-backdrop"></div>) */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 50;
+}
+
+/* Drawer container (existing .drawer wrapper) */
+.drawer {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  width: min(520px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  z-index: 60;
+
+  /* closed by default */
+  transform: translateX(110%);
+  transition: transform 140ms ease;
+}
+
+/* When open: slide in */
+body.drawer-open .drawer {
+  transform: translateX(0);
+}
+body.drawer-open .drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Make drawer card a bit “stronger” */
+.drawer .card,
+.drawer .ops-card {
+  background: rgba(15,18,30,0.92);
+  border-color: rgba(255,255,255,0.16);
+}
+
+/* Prevent table being squeezed by any leftover grid styles */
+.table-wrap {
   width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  background: rgba(0,0,0,0.18);
 }
 
-/* header */
-th {
-  text-align: left;
-  padding: 10px 12px;
-  font-weight: 800;
-  font-size: 0.92rem;
-  color: rgba(255,255,255,0.88);
-  background: rgba(255,255,255,0.06);
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  z-index: 1;
+/* On smaller screens: drawer becomes full-screen */
+@media (max-width: 900px) {
+  .drawer {
+    top: 0;
+    right: 0;
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
 }
-
-/* cells */
-td {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  vertical-align: middle;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(255,255,255,0.92);
-}
-tr:last-child td { border-bottom: none; }
-
-td[title] { cursor: help; }
-
-/* column widths you already rely on */
-.col-sel { width: 32px; }
-.col-status { width: 190px; }
-.col-listing { width: 140px; }
-.col-count { width: 90px; }
-.col-lastseen { width: 210px; }
-.col-computer { width: 260px; }
-.col-sha { width: 170px; }
-.col-indicator { width: 220px; }
-.col-source { width: 180px; }
-.col-image { width: auto; }
-
-/* links inside table */
-table a {
-  color: rgba(255,255,255,0.92);
-  text-decoration: none;
-}
-table a:hover { text-decoration: underline; }
-
-/* Hover and clickable rows */
-tr.clickable { cursor: pointer; }
-tbody tr:hover { background: rgba(255,255,255,0.04); }
-tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.10); outline-offset: -1px; }
-
-/* Sorting link styling */
-th.sortable a {
-  color: inherit;
-  text-decoration: none;
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-}
-th.sortable a:hover { text-decoration: underline; }
-.sort-ind { font-size: 0.85em; opacity: 0.75; }
-
-/* --------- Row semantics (use left border, not full fill) --------- */
-/* Default: no border */
-tbody tr { border-left: 0; }
-
-/* Sysmon 3/22 state rules from your spec:
-   - PENDING => grey
-   - NO_LISTING => white/neutral
-   - LISTED => red
-   - ERROR => orange/yellow
-*/
-.ROW_PENDING   { box-shadow: inset 6px 0 0 rgba(255,255,255,0.35); }
-.ROW_NOLISTING { box-shadow: inset 6px 0 0 rgba(255,255,255,0.16); }
-.ROW_LISTED    { box-shadow: inset 6px 0 0 rgba(255,120,120,0.55); }
-.ROW_ERROR     { box-shadow: inset 6px 0 0 rgba(255,210,120,0.65); }
-.ROW_OTHER     { box-shadow: inset 6px 0 0 rgba(255,255,255,0.16); }
-
-/* Optional: very subtle hover tints to reinforce */
-.ROW_LISTED:hover  { background: rgba(255,110,110,0.08) !important; }
-.ROW_ERROR:hover   { background: rgba(255,210,110,0.08) !important; }
-.ROW_PENDING:hover { background: rgba(255,255,255,0.06) !important; }
-
-/* --------- Badges --------- */
-.badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  border: 1px solid var(--border);
-  background: rgba(0,0,0,0.18);
-  color: rgba(255,255,255,0.90);
-  vertical-align: middle;
-}
-
-/* listing badges */
-.badge.ls-pending { opacity: 0.95; }
-.badge.ls-no_listing { opacity: 0.95; }
-.badge.ls-listed { font-weight: 800; }
-
-/* disposition */
-.badge.disp-accepted { background: rgba(110,168,255,0.18); border-color: rgba(110,168,255,0.30); font-weight: 800; }
-.badge.disp-escalated { background: rgba(255,210,110,0.18); border-color: rgba(255,210,110,0.30); font-weight: 800; }
-.badge.disp-other { background: rgba(255,255,255,0.08); border-color: var(--border); font-weight: 800; }
-
-/* VT states */
-.badge.vt-pending { background: rgba(255,255,255,0.08); }
-.badge.vt-not_found { background: rgba(110,168,255,0.14); border-color: rgba(110,168,255,0.30); }
-.badge.vt-rate_limited { background: rgba(255,210,110,0.18); border-color: rgba(255,210,110,0.30); }
-.badge.vt-found { background: rgba(130,255,170,0.12); border-color: rgba(130,255,170,0.22); }
-.badge.vt-error { background: rgba(255,120,120,0.14); border-color: rgba(255,120,120,0.26); }
-
-.badge.vtred {
-  background: rgba(255,120,120,0.16);
-  border-color: rgba(255,120,120,0.30);
-  font-weight: 900;
-}
-
-/* --------- Bulk bar + column toggles (if used later) --------- */
-.bulkbar, .col-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  margin: 10px 0 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: rgba(0,0,0,0.18);
-  color: var(--muted);
-}
-.bulkitem, .col-toggles label { display: inline-flex; gap: 8px; align-items: center; }
-.bulkbar input[type="text"] {
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(0,0,0,0.20);
-  color: var(--text);
-}
-
-/* --------- (Optional) make legacy GREEN/GREY/RED classes non-destructive ---------
-   If any old template still uses these classes for <tr class="RED"> etc.,
-   keep them readable, but do NOT paint the whole row.
-*/
-.GREEN, .GREY, .RED {
-  box-shadow: inset 6px 0 0 rgba(255,255,255,0.16);
-}
-.RED { box-shadow: inset 6px 0 0 rgba(255,120,120,0.55); }
