@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Greycode{% endblock %}</title>
+
+  <!-- “Nice” site styling -->
+  <link rel="stylesheet" href="/site/style.css" />
+  <!-- Ops-specific add-on -->
+  <link rel="stylesheet" href="/static/style.css" />
+
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header class="card header" style="margin-bottom: 14px;">
+      <div class="brand">
+        <img class="logo" src="/site/greycode-logo.png" alt="Greycode logo" />
+        <div class="title">
+          <h1 style="margin:0;">Greycode</h1>
+          <p style="margin:0;">Ops • Sysmon enrichment</p>
+        </div>
+      </div>
+
+      <div class="chips">
+        {% if vt_enabled %}
+          <span class="chip">VT enabled</span>
+        {% else %}
+          <span class="chip">VT disabled</span>
+        {% endif %}
+        <span class="chip">VT queue: {{ vt_queue_len }}</span>
+        <span class="chip">Staged: {{ staged_candidates }}</span>
+      </div>
+
+      <nav class="tabs" style="margin-top:12px;">
+        <a href="/ui/sysmon/1" class="{% if tab==1 %}active{% endif %}">Sysmon 1</a>
+        <a href="/ui/sysmon/3" class="{% if tab==3 %}active{% endif %}">Sysmon 3</a>
+        <a href="/ui/sysmon/22" class="{% if tab==22 %}active{% endif %}">Sysmon 22</a>
+
+        <span style="flex:1;"></span>
+
+        <form method="post" action="/logout" style="margin:0;">
+          <button class="btn" type="submit">Logout</button>
+        </form>
+      </nav>
+    </header>
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

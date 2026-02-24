@@ -842,122 +842,14 @@ async def list_hashes(
 
 
 @app.get("/ui", response_class=HTMLResponse)
-
-# ToDo: Replace or remove when other tabs are finished
-async def ui_redirect():
+async def ui_redirect(_auth=Depends(require_login)):
     return RedirectResponse(url="/ui/sysmon/1", status_code=302)
-
-async def ui_index(
-    request: Request,
-    status: str = Query("ALL"),
-    triage: str = Query("ALL"),
-    q: str = Query(""),
-    sort: str = Query("last_seen"),
-    order: str = Query("desc"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(200, ge=10, le=2000),
-):
-    # 1) Pull keys
-    rows = []
-    cursor = 0
-    pattern = "greycode:sha256:*"
-    q_lower = q.strip().lower()
-    total_hashes = 0
-
-    while True:
-        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
-        for key in keys:
-            total_hashes += 1
-            sha = key.split(":")[-1]
-            data = await r.hgetall(key)
-
-            row = {
-                "sha256": sha,
-                "status": (data.get("status") or "GREY").upper(),
-                "vt_state": (data.get("vt_state") or "").upper(),
-                "vt_malicious": int(data.get("vt_malicious") or 0),
-                "disposition": (data.get("disposition") or "").upper(),
-                "ticket_id": data.get("ticket_id") or "",
-                "computer": data.get("computer") or "",
-                "image": data.get("image") or "",
-                "count_total": int(data.get("count_total") or 0),
-                "first_seen": data.get("first_seen") or "",
-                "last_seen": data.get("last_seen") or "",
-                "source": data.get("source") or "",
-                "vt_link": f"https://www.virustotal.com/gui/file/{sha}",
-            }
-
-            # 2) Apply filters
-            if status != "ALL" and row["status"] != status:
-                continue
-
-            tri = (triage or "ALL").upper()
-            if tri == "OPEN":
-                # Open work queue: RED and no disposition
-                if not (row["status"] == "RED" and row["disposition"] == ""):
-                    continue
-            elif tri == "TRIAGED":
-                # Any disposition set (ACCEPTED/ESCALATED/whatever)
-                if row["disposition"] == "":
-                    continue
-
-            if q_lower:
-                hay = f'{row["sha256"]} {row["computer"]} {row["image"]}'.lower()
-                if q_lower not in hay:
-                    continue
-
-            rows.append(row)
-
-        if cursor == 0:
-            break
-
-    # 3) Sort
-    reverse = (order.lower() != "asc")
-
-    if sort == "count_total":
-        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
-    elif sort == "status":
-        # Custom status ordering (RED first is usually helpful)
-        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
-        rows.sort(key=lambda x: (rank.get(x["status"], 99), x["last_seen"]), reverse=False)
-        if reverse:
-            rows.reverse()
-    elif sort == "vt_state":
-        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
-    else:
-        # default: last_seen
-        rows.sort(key=lambda x: x["last_seen"], reverse=reverse)
-
-    # 4) Pagination
-    total = len(rows)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_rows = rows[start:end]
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "rows": page_rows,
-            "total": total,
-            "total_hashes": total_hashes,
-            "page": page,
-            "page_size": page_size,
-            "status": status,
-            "triage": triage,
-            "q": q,
-            "sort": sort,
-            "order": order,
-            "vt_enabled": vt_enabled(),
-            **(await get_ui_metrics()),
-        },
-    )
 
 @app.get("/ui/sysmon/{event_id}", response_class=HTMLResponse)
 async def ui_sysmon(
     request: Request,
     event_id: int = ApiPath(..., ge=1),
-    # Common controls
+
     status: str = Query("ALL"),
     q: str = Query(""),
     sort: str = Query("last_seen"),
@@ -965,11 +857,69 @@ async def ui_sysmon(
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=10, le=2000),
 
-    # Sysmon 1 specific
-    triage: str = Query("ALL"),  # ALL | OPEN | TRIAGED (only used for event_id=1)
+    triage: str = Query("ALL"),
+    listing_state: str = Query("ALL"),
+    _auth=Depends(require_login),
+):
+    tab = int(event_id)
 
-    # Sysmon 3/22 specific
-    listing_state: str = Query("ALL"),  # ALL | PENDING | NO_LISTING | LISTED (only used for 3/22)
+    if tab == 1:
+        indicator_label = "SHA256"
+        indicator_field = "sha256"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY", "GREEN"}
+    elif tab == 3:
+        indicator_label = "DestinationIp"
+        indicator_field = "ip"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+    elif tab == 22:
+        indicator_label = "QueryName"
+        indicator_field = "domain"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+    else:
+        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+    status = (status or "ALL").upper()
+    if status not in allowed_status:
+        status = "ALL"
+
+    return templates.TemplateResponse(
+        "index_sysmon.html",
+        {
+            "request": request,
+            "tab": tab,
+
+            "status": status,
+            "triage": triage,
+            "listing_state": listing_state,
+
+            "q": q,
+            "sort": sort,
+            "order": order,
+            "page": page,
+            "page_size": page_size,
+
+            "indicator_label": indicator_label,
+            "indicator_field": indicator_field,
+
+            "vt_enabled": vt_enabled(),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.get("/ui/sysmon/{event_id}/table", response_class=HTMLResponse)
+async def ui_sysmon_table(
+    request: Request,
+    event_id: int = ApiPath(..., ge=1),
+
+    status: str = Query("ALL"),
+    q: str = Query(""),
+    sort: str = Query("last_seen"),
+    order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=10, le=2000),
+
+    triage: str = Query("ALL"),
+    listing_state: str = Query("ALL"),
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
@@ -1004,16 +954,12 @@ async def ui_sysmon(
 
     rows = []
     cursor = 0
-    total_seen = 0
 
     while True:
         cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
         for key in keys:
-            total_seen += 1
             data = await r.hgetall(key)
-
-            # indicator value extracted from redis key
-            indicator = key.split(":", 2)[-1]  # works for sha256/ip/domain patterns
+            indicator = key.split(":", 2)[-1]
 
             row = {
                 "kind": kind,
@@ -1028,12 +974,10 @@ async def ui_sysmon(
                 "first_seen": data.get("first_seen") or "",
                 "last_seen": data.get("last_seen") or "",
                 "source": data.get("source") or "",
-                # context fields differ by kind
                 "computer": data.get("computer") or "",
                 "computer_first": data.get("computer_first") or "",
                 "computer_last": data.get("computer_last") or "",
                 "image": data.get("image") or "",
-                # links
                 "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
             }
 
@@ -1052,19 +996,16 @@ async def ui_sysmon(
 
             if tab in (3, 22):
                 ls = (listing_state or "ALL").upper()
-                if ls != "ALL":
-                    if row["listing_state"] != ls:
-                        continue
+                if ls != "ALL" and row["listing_state"] != ls:
+                    continue
 
             if q_lower:
-                # search across relevant fields
                 if tab == 1:
                     hay = f'{row.get("sha256","")} {row.get("computer","")} {row.get("image","")}'.lower()
                 elif tab == 3:
                     hay = f'{row.get("ip","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
                 else:
                     hay = f'{row.get("domain","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
-
                 if q_lower not in hay:
                     continue
 
@@ -1097,7 +1038,7 @@ async def ui_sysmon(
     page_rows = rows[start:end]
 
     return templates.TemplateResponse(
-        "index_sysmon.html",
+        "partials/sysmon_table.html",
         {
             "request": request,
             "tab": tab,
@@ -1107,22 +1048,59 @@ async def ui_sysmon(
             "page_size": page_size,
 
             "status": status,
+            "triage": triage,
+            "listing_state": listing_state,
+
             "q": q,
             "sort": sort,
             "order": order,
 
-            "triage": triage,
-            "listing_state": listing_state,
-
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
-
-            "vt_enabled": vt_enabled(),
-            **(await get_ui_metrics()),
         },
     )
 
+@app.get("/ui/sysmon/{event_id}/row/{indicator}", response_class=HTMLResponse)
+async def ui_sysmon_row(
+    request: Request,
+    event_id: int = ApiPath(..., ge=1),
+    indicator: str = ApiPath(...),
+    _auth=Depends(require_login),
+):
+    tab = int(event_id)
 
+    if tab == 1:
+        key = f"greycode:sha256:{indicator}"
+    elif tab == 3:
+        try:
+            indicator = normalize_ip(indicator)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid IP")
+        key = f"greycode:ip:{indicator}"
+    elif tab == 22:
+        indicator = normalize_domain(indicator)
+        if not indicator:
+            raise HTTPException(status_code=400, detail="Invalid domain")
+        key = f"greycode:domain:{indicator}"
+    else:
+        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+    data = await r.hgetall(key)
+    if not data:
+        return HTMLResponse("<div class='card'><p class='muted'>Not found.</p></div>", status_code=404)
+
+    return templates.TemplateResponse(
+        "partials/sysmon_drawer.html",
+        {
+            "request": request,
+            "tab": tab,
+            "indicator": indicator,
+            "data": data,
+            "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
+            "vt_last_checked_fmt": fmt_epoch(data.get("vt_last_checked")),
+            "vt_next_retry_at_fmt": fmt_epoch(data.get("vt_next_retry_at")),
+        },
+    )
 
 @app.get("/ui/hash/{sha256}", response_class=HTMLResponse)
 async def ui_hash_detail(request: Request, sha256: str, _auth=Depends(require_login)):
