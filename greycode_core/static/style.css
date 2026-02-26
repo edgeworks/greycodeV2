@@ -4,10 +4,10 @@
    Layout / width overrides
    ----------------------------- */
 
-/* /site/style.css caps .wrap at 1050px — override for ops pages */
+
 .wrap {
-  max-width: 1400px;          /* use more screen */
-  width: min(1400px, 100%);
+  max-width: 2500px;          /* use more screen */
+  width: 100%;
 }
 
 /* Make sure ops pages don't inherit old "body margin:20px" */
@@ -98,8 +98,10 @@ td.mono, .mono {
 
 /* clickable rows */
 tr.clickable { cursor: pointer; }
+
+/* clickable rows: preserve semantic color, just add a subtle sheen */
 tr.clickable:hover td {
-  background: rgba(255,255,255,0.04);
+  box-shadow: inset 0 0 0 9999px rgba(255,255,255,0.03);
 }
 
 /* Column widths (tune as needed) */
@@ -207,6 +209,31 @@ a:hover { text-decoration: underline; }
 }
 
 /* -----------------------------
+   Row semantics (Sysmon 1)
+   - RED   => red tint
+   - GREY  => grey tint (pending-ish)
+   - GREEN => green tint (known good)
+   - ERROR => orange/yellow tint
+   Note: we tint TDs to override the table base background.
+   ----------------------------- */
+
+.RED td {
+  background: rgba(255,110,110,0.10);
+}
+
+.GREY td {
+  background: rgba(255,255,255,0.05);
+}
+
+.GREEN td {
+  background: rgba(120,255,170,0.10);
+}
+
+.ERROR td {
+  background: rgba(255,210,110,0.10);
+}
+
+/* -----------------------------
    Sortable headers
    ----------------------------- */
 th.sortable a {
@@ -241,7 +268,7 @@ th.sortable a:hover { text-decoration: underline; }
 }
 
 .ops-banner-inner {
-  max-width: 1400px;
+  max-width: 2500px;
   margin: 0 auto;
   padding: 0 18px;
   display: flex;
@@ -297,7 +324,7 @@ th.sortable a:hover { text-decoration: underline; }
 }
 
 .ops-toolbar-inner {
-  max-width: 1400px;
+  max-width: 2500px;
   margin: 0 auto;
   padding: 0 18px;
   display: flex;

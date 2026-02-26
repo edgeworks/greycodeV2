@@ -22,7 +22,7 @@ body {
   min-height: 100vh;
 }
 
-.wrap { max-width: 1050px; margin: 0 auto; padding: 28px 18px 42px; }
+.wrap { max-width: 2500px; margin: 0 auto; padding: 28px 18px 42px; }
 
 .card {
   background: var(--card);
