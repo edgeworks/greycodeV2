@@ -106,10 +106,10 @@ tr.clickable:hover td {
 
 /* Column widths (tune as needed) */
 .col-sel { width: 34px; }
-.col-status { width: 170px; }
+.col-status { width: 100px; }
 .col-listing { width: 140px; }
 .col-count { width: 90px; }
-.col-lastseen { width: 190px; }
+.col-lastseen { width: 195px; }
 .col-computer { width: 220px; }
 .col-sha, .col-indicator { width: 170px; }
 .col-source { width: 160px; }
@@ -264,7 +264,7 @@ th.sortable a:hover { text-decoration: underline; }
 /* Banner */
 .ops-banner {
   width: 100%;
-  padding: 18px 0 10px;
+  padding: 4px 0 30px;
 }
 
 .ops-banner-inner {
@@ -348,7 +348,7 @@ th.sortable a:hover { text-decoration: underline; }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 2px 12px;
   border-radius: 999px;
   color: var(--muted);
   text-decoration: none;
