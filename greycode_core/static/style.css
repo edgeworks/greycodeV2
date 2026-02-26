@@ -449,3 +449,42 @@ body.drawer-open .drawer-backdrop {
     justify-content: flex-start;
   }
 }
+
+/* Table container inside your card */
+.tablemeta { margin: 0 0 10px; display:flex; justify-content: space-between; align-items: center; }
+.tablebox { width: 100%; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: rgba(0,0,0,0.10); }
+
+/* Use your existing table base, but make it feel “UI-ish” */
+table.opstable { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.opstable th, table.opstable td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  vertical-align: top;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sticky header (nice when table scrolls) */
+table.opstable thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(10,12,20,0.85);
+  backdrop-filter: blur(10px);
+  z-index: 1;
+}
+
+/* Sort links look like subtle inline controls */
+th.sortable .sortlink {
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+th.sortable .sortlink:hover { text-decoration: underline; }
+.sort-ind { font-size: 0.85em; opacity: 0.7; }
+
+/* Hover row */
+tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.12); }

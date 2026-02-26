@@ -1,23 +1,25 @@
-<section class="card">
-  <p class="muted" style="margin-top:0;">
+<div class="tablemeta">
+  <div class="muted">
     Results: <b>{{ total }}</b> • Page {{ page }}
-  </p>
+  </div>
+</div>
 
-  {# Sort helper: toggles order if same column, otherwise defaults desc #}
-  {% macro sort_link(label, key) -%}
-    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
-    <a href="#"
-      hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
-      hx-target="#tablewrap"
-      hx-push-url="true">
-      {{ label }}
-      {% if sort == key %}
-        <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
-      {% endif %}
-    </a>
-  {%- endmacro %}
+{# Sort helper: toggles order if same column, otherwise defaults desc #}
+{% macro sort_link(label, key) -%}
+  {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+  <a class="sortlink" href="#"
+     hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
+     hx-target="#tablewrap"
+     hx-push-url="true">
+    <span>{{ label }}</span>
+    {% if sort == key %}
+      <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
+    {% endif %}
+  </a>
+{%- endmacro %}
 
-  <table>
+<div class="tablebox">
+  <table class="opstable">
     <thead>
       <tr>
         <th class="sortable">{{ sort_link("Status","status") }}</th>
@@ -26,7 +28,7 @@
           <th class="sortable">{{ sort_link("Listing","listing_state") }}</th>
         {% endif %}
 
-        <th class="sortable">{{ sort_link("Count","count_total") }}</th>
+        <th class="sortable num">{{ sort_link("Count","count_total") }}</th>
         <th class="sortable">{{ sort_link("Last seen","last_seen") }}</th>
 
         {% if tab == 1 %}
@@ -144,23 +146,22 @@
     {% endfor %}
     </tbody>
   </table>
+</div>
 
-  <div class="pager">
-    {% if page > 1 %}
-      <a href="#"
-        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
-        hx-target="#tablewrap"
-        hx-push-url="true">Prev</a>
-    {% endif %}
+<div class="pager">
+  {% if page > 1 %}
+    <a class="btn" href="#"
+       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
+       hx-target="#tablewrap"
+       hx-push-url="true">Prev</a>
+  {% endif %}
 
-    <span>Page {{ page }}</span>
+  <span class="muted">Page {{ page }}</span>
 
-    {% if page * page_size < total %}
-      <a href="#"
-        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
-        hx-target="#tablewrap"
-        hx-push-url="true">Next</a>
-    {% endif %}
-  </div>
-
-</section>
+  {% if page * page_size < total %}
+    <a class="btn" href="#"
+       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
+       hx-target="#tablewrap"
+       hx-push-url="true">Next</a>
+  {% endif %}
+</div>
