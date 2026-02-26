@@ -13,22 +13,6 @@
 /* Make sure ops pages don't inherit old "body margin:20px" */
 body { margin: 0; }
 
-/* A “content card” helper (matches /site/.card but used in ops templates too) */
-.ops-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-  padding: 16px;
-}
-
-/* Table + drawer container.
-   IMPORTANT: table should be full width; drawer overlays, so layout is 1 column. */
-.ops-layout {
-  display: block;
-}
-
 /* -----------------------------
    Controls (filters row)
    ----------------------------- */
@@ -222,11 +206,6 @@ a:hover { text-decoration: underline; }
   background: rgba(255,255,255,0.02);
 }
 
-/* Keep legacy Sysmon 1 row classes if any templates still use them */
-.GREEN td { background: rgba(120,255,170,0.10); }
-.GREY  td { background: rgba(255,255,255,0.05); }
-.RED   td { background: rgba(255,110,110,0.10); }
-
 /* -----------------------------
    Sortable headers
    ----------------------------- */
@@ -252,73 +231,8 @@ th.sortable a:hover { text-decoration: underline; }
   color: var(--muted);
 }
 
-/* -----------------------------
-   Drawer overlay (the important part)
-   ----------------------------- */
-
-/* Backdrop element (you'll add <div id="drawerBackdrop" class="drawer-backdrop"></div>) */
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.55);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-  z-index: 50;
-}
-
-/* Drawer container (existing .drawer wrapper) */
-.drawer {
-  position: fixed;
-  top: 18px;
-  right: 18px;
-  width: min(520px, calc(100vw - 36px));
-  max-height: calc(100vh - 36px);
-  overflow: auto;
-  z-index: 60;
-
-  /* closed by default */
-  transform: translateX(110%);
-  transition: transform 140ms ease;
-}
-
-/* When open: slide in */
-body.drawer-open .drawer {
-  transform: translateX(0);
-}
-body.drawer-open .drawer-backdrop {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* Make drawer card a bit “stronger” */
-.drawer .card,
-.drawer .ops-card {
-  background: rgba(15,18,30,0.92);
-  border-color: rgba(255,255,255,0.16);
-}
-
-/* Prevent table being squeezed by any leftover grid styles */
-.table-wrap {
-  width: 100%;
-}
-
-/* On smaller screens: drawer becomes full-screen */
-@media (max-width: 900px) {
-  .drawer {
-    top: 0;
-    right: 0;
-    width: 100vw;
-    max-height: 100vh;
-    border-radius: 0;
-  }
-}
-
 
 /* ---------- Banner + toolbar (full width, NOT a card) ---------- */
-
-/* Make wrap wider for ops pages (keep if you already have it) */
-.wrap { max-width: 1400px; width: min(1400px, 100%); }
 
 /* Banner */
 .ops-banner {
