@@ -22,27 +22,27 @@
   <table class="opstable">
     <thead>
       <tr>
-        <th class="sortable">{{ sort_link("Status","status") }}</th>
+        <th class="col-status sortable">{{ sort_link("Status","status") }}</th>
 
         {% if tab in [3,22] %}
-          <th class="sortable">{{ sort_link("Listing","listing_state") }}</th>
+          <th class="col-listing sortable">{{ sort_link("Listing","listing_state") }}</th>
         {% endif %}
 
-        <th class="sortable num">{{ sort_link("Count","count_total") }}</th>
-        <th class="sortable">{{ sort_link("Last seen","last_seen") }}</th>
+        <th class="col-count sortable num">{{ sort_link("Count","count_total") }}</th>
+        <th class="col-lastseen sortable">{{ sort_link("Last seen","last_seen") }}</th>
 
         {% if tab == 1 %}
-          <th>Computer</th>
-          <th>Image</th>
-          <th>{{ indicator_label }}</th>
+          <th class="col-computer sortable">{{ sort_link("Computer","computer") }}</th>
+          <th class="col-image sortable">{{ sort_link("Image","image") }}</th>
+          <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
         {% elif tab == 3 %}
-          <th>Computer (first/last)</th>
-          <th>{{ indicator_label }}</th>
-          <th>Source</th>
+          <th class="col-computer sortable">{{ sort_link("Computer (first/last)","computer_last") }}</th>
+          <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
+          <th class="col-source sortable">{{ sort_link("Source","source") }}</th>
         {% else %}
-          <th>Computer (first/last)</th>
-          <th>{{ indicator_label }}</th>
-          <th>Source</th>
+          <th class="col-computer sortable">{{ sort_link("Computer (first/last)","computer_last") }}</th>
+          <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
+          <th class="col-source sortable">{{ sort_link("Source","source") }}</th>
         {% endif %}
       </tr>
     </thead>
