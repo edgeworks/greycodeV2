@@ -34,7 +34,7 @@
         {% if tab == 1 %}
           <th class="col-computer sortable">{{ sort_link("Computer","computer") }}</th>
           <th class="col-image sortable">{{ sort_link("Image","image") }}</th>
-          <th class="col-sha sortable">{{ sort_link("SHA256"","sha256") }}</th>
+          <th class="col-sha sortable">{{ sort_link(indicator_label,"indicator") }}</th>
         {% elif tab == 3 %}
           <th class="col-computer sortable">{{ sort_link("Computer (first/last)","computer_last") }}</th>
           <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
