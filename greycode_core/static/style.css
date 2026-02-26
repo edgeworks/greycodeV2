@@ -65,7 +65,7 @@ body { margin: 0; }
   filter: brightness(1.06);
 }
 
-/* Buttons (reuse .btn from /site, but ensure consistency on ops pages) */
+/* Buttons */
 button.btn {
   appearance: none;
 }
@@ -199,7 +199,6 @@ a:hover { text-decoration: underline; }
 
 /* -----------------------------
    Row semantics (Sysmon 3/22)
-   You wanted:
    - GREY + PENDING => grey
    - GREY + NO_LISTING => white
    - RED + LISTED => red
@@ -312,5 +311,141 @@ body.drawer-open .drawer-backdrop {
     width: 100vw;
     max-height: 100vh;
     border-radius: 0;
+  }
+}
+
+
+/* ---------- Banner + toolbar (full width, NOT a card) ---------- */
+
+/* Make wrap wider for ops pages (keep if you already have it) */
+.wrap { max-width: 1400px; width: min(1400px, 100%); }
+
+/* Banner */
+.ops-banner {
+  width: 100%;
+  padding: 18px 0 10px;
+}
+
+.ops-banner-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ops-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ops-title .title h1 {
+  margin: 0;
+  font-size: 1.55rem;
+  letter-spacing: 0.2px;
+}
+
+.ops-title .title p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+/* Right-side icons (placeholders for now) */
+.ops-actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.iconbtn:hover { filter: brightness(1.08); }
+
+/* Toolbar row below banner */
+.ops-toolbar {
+  width: 100%;
+  padding: 10px 0 16px;
+}
+
+.ops-toolbar-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+/* Tabs styled like a selector pill group */
+.ops-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.16);
+  backdrop-filter: blur(10px);
+}
+
+.ops-tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.ops-tabs a:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+}
+
+.ops-tabs a.active {
+  color: var(--text);
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.16);
+}
+
+/* Chips aligned right, same height zone as selector */
+.ops-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* .chip from /site/style.css consistent here */
+.ops-chips .chip {
+  background: rgba(0,0,0,0.14);
+}
+
+/* Responsive: toolbar stacks */
+@media (max-width: 900px) {
+  .ops-toolbar-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ops-chips {
+    justify-content: flex-start;
   }
 }

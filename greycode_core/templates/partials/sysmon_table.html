@@ -1,163 +1,166 @@
-<p class="muted" style="margin-top:0;">
-  Results: <b>{{ total }}</b> • Page {{ page }}
-</p>
+<section class="card">
+  <p class="muted" style="margin-top:0;">
+    Results: <b>{{ total }}</b> • Page {{ page }}
+  </p>
 
-{# Sort helper: toggles order if same column, otherwise defaults desc #}
-{% macro sort_link(label, key) -%}
-  {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
-  <a href="#"
-     hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
-     hx-target="#tablewrap"
-     hx-push-url="true">
-    {{ label }}
-    {% if sort == key %}
-      <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
-    {% endif %}
-  </a>
-{%- endmacro %}
-
-<table>
-  <thead>
-    <tr>
-      <th class="sortable">{{ sort_link("Status","status") }}</th>
-
-      {% if tab in [3,22] %}
-        <th class="sortable">{{ sort_link("Listing","listing_state") }}</th>
+  {# Sort helper: toggles order if same column, otherwise defaults desc #}
+  {% macro sort_link(label, key) -%}
+    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+    <a href="#"
+      hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
+      hx-target="#tablewrap"
+      hx-push-url="true">
+      {{ label }}
+      {% if sort == key %}
+        <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
       {% endif %}
+    </a>
+  {%- endmacro %}
 
-      <th class="sortable">{{ sort_link("Count","count_total") }}</th>
-      <th class="sortable">{{ sort_link("Last seen","last_seen") }}</th>
+  <table>
+    <thead>
+      <tr>
+        <th class="sortable">{{ sort_link("Status","status") }}</th>
 
-      {% if tab == 1 %}
-        <th>Computer</th>
-        <th>Image</th>
-        <th>{{ indicator_label }}</th>
-      {% elif tab == 3 %}
-        <th>Computer (first/last)</th>
-        <th>{{ indicator_label }}</th>
-        <th>Source</th>
-      {% else %}
-        <th>Computer (first/last)</th>
-        <th>{{ indicator_label }}</th>
-        <th>Source</th>
-      {% endif %}
-    </tr>
-  </thead>
+        {% if tab in [3,22] %}
+          <th class="sortable">{{ sort_link("Listing","listing_state") }}</th>
+        {% endif %}
 
-  <tbody>
-  {% for row in rows %}
-    {% if tab == 1 %}
-      {% set id = row.sha256 %}
-      {% set rowclass = row.status %}
-    {% elif tab == 3 %}
-      {% set id = row.ip %}
-      {% if row.status == "ERROR" %}
-        {% set rowclass = "ROW_ERROR" %}
-      {% elif row.status == "RED" and row.listing_state == "LISTED" %}
-        {% set rowclass = "ROW_LISTED" %}
-      {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
-        {% set rowclass = "ROW_PENDING" %}
-      {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
-        {% set rowclass = "ROW_NOLISTING" %}
-      {% else %}
-        {% set rowclass = "ROW_OTHER" %}
-      {% endif %}
-    {% else %}
-      {% set id = row.domain %}
-      {% if row.status == "ERROR" %}
-        {% set rowclass = "ROW_ERROR" %}
-      {% elif row.status == "RED" and row.listing_state == "LISTED" %}
-        {% set rowclass = "ROW_LISTED" %}
-      {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
-        {% set rowclass = "ROW_PENDING" %}
-      {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
-        {% set rowclass = "ROW_NOLISTING" %}
-      {% else %}
-        {% set rowclass = "ROW_OTHER" %}
-      {% endif %}
-    {% endif %}
-
-    <tr class="{{ rowclass }} clickable"
-        hx-get="/ui/sysmon/{{tab}}/row/{{ id }}"
-        hx-target="#drawer">
-
-      <td class="col-status">
-        {{ row.status }}
+        <th class="sortable">{{ sort_link("Count","count_total") }}</th>
+        <th class="sortable">{{ sort_link("Last seen","last_seen") }}</th>
 
         {% if tab == 1 %}
-          {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
-            <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
-          {% endif %}
+          <th>Computer</th>
+          <th>Image</th>
+          <th>{{ indicator_label }}</th>
+        {% elif tab == 3 %}
+          <th>Computer (first/last)</th>
+          <th>{{ indicator_label }}</th>
+          <th>Source</th>
+        {% else %}
+          <th>Computer (first/last)</th>
+          <th>{{ indicator_label }}</th>
+          <th>Source</th>
+        {% endif %}
+      </tr>
+    </thead>
 
-          {% if row.disposition %}
-            {% if row.disposition == "ACCEPTED" %}
-              <span class="badge disp-accepted">ACCEPTED</span>
-            {% elif row.disposition == "ESCALATED" %}
-              <span class="badge disp-escalated" title="{% if row.ticket_id %}{{ row.ticket_id }}{% endif %}">ESCALATED</span>
-            {% else %}
-              <span class="badge disp-other">{{ row.disposition }}</span>
+    <tbody>
+    {% for row in rows %}
+      {% if tab == 1 %}
+        {% set id = row.sha256 %}
+        {% set rowclass = row.status %}
+      {% elif tab == 3 %}
+        {% set id = row.ip %}
+        {% if row.status == "ERROR" %}
+          {% set rowclass = "ROW_ERROR" %}
+        {% elif row.status == "RED" and row.listing_state == "LISTED" %}
+          {% set rowclass = "ROW_LISTED" %}
+        {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
+          {% set rowclass = "ROW_PENDING" %}
+        {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
+          {% set rowclass = "ROW_NOLISTING" %}
+        {% else %}
+          {% set rowclass = "ROW_OTHER" %}
+        {% endif %}
+      {% else %}
+        {% set id = row.domain %}
+        {% if row.status == "ERROR" %}
+          {% set rowclass = "ROW_ERROR" %}
+        {% elif row.status == "RED" and row.listing_state == "LISTED" %}
+          {% set rowclass = "ROW_LISTED" %}
+        {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
+          {% set rowclass = "ROW_PENDING" %}
+        {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
+          {% set rowclass = "ROW_NOLISTING" %}
+        {% else %}
+          {% set rowclass = "ROW_OTHER" %}
+        {% endif %}
+      {% endif %}
+
+      <tr class="{{ rowclass }} clickable"
+          hx-get="/ui/sysmon/{{tab}}/row/{{ id }}"
+          hx-target="#drawer">
+
+        <td class="col-status">
+          {{ row.status }}
+
+          {% if tab == 1 %}
+            {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
+              <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
+            {% endif %}
+
+            {% if row.disposition %}
+              {% if row.disposition == "ACCEPTED" %}
+                <span class="badge disp-accepted">ACCEPTED</span>
+              {% elif row.disposition == "ESCALATED" %}
+                <span class="badge disp-escalated" title="{% if row.ticket_id %}{{ row.ticket_id }}{% endif %}">ESCALATED</span>
+              {% else %}
+                <span class="badge disp-other">{{ row.disposition }}</span>
+              {% endif %}
+            {% endif %}
+
+            {% if row.status == "GREY" %}
+              <span class="badge vt-{{ (row.vt_state or 'PENDING')|lower }}">{{ row.vt_state or "PENDING" }}</span>
             {% endif %}
           {% endif %}
+        </td>
 
-          {% if row.status == "GREY" %}
-            <span class="badge vt-{{ (row.vt_state or 'PENDING')|lower }}">{{ row.vt_state or "PENDING" }}</span>
-          {% endif %}
+        {% if tab in [3,22] %}
+          <td class="col-listing">
+            {% if row.listing_state %}
+              <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
         {% endif %}
-      </td>
 
-      {% if tab in [3,22] %}
-        <td class="col-listing">
-          {% if row.listing_state %}
-            <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
-          {% else %}
-            -
-          {% endif %}
-        </td>
-      {% endif %}
+        <td class="col-count num">{{ row.count_total }}</td>
+        <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
 
-      <td class="col-count num">{{ row.count_total }}</td>
-      <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
+        {% if tab == 1 %}
+          <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+          <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+          <td class="col-indicator mono">
+            {{ row.sha256[:12] }}…
+            <span class="sep">|</span>
+            <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
+          </td>
+        {% elif tab == 3 %}
+          <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+            {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+          </td>
+          <td class="col-indicator mono">{{ row.ip }}</td>
+          <td class="col-source mono">{{ row.source or "-" }}</td>
+        {% else %}
+          <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+            {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+          </td>
+          <td class="col-indicator mono">{{ row.domain }}</td>
+          <td class="col-source mono">{{ row.source or "-" }}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
 
-      {% if tab == 1 %}
-        <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
-        <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
-        <td class="col-indicator mono">
-          {{ row.sha256[:12] }}…
-          <span class="sep">|</span>
-          <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
-        </td>
-      {% elif tab == 3 %}
-        <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
-          {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
-        </td>
-        <td class="col-indicator mono">{{ row.ip }}</td>
-        <td class="col-source mono">{{ row.source or "-" }}</td>
-      {% else %}
-        <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
-          {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
-        </td>
-        <td class="col-indicator mono">{{ row.domain }}</td>
-        <td class="col-source mono">{{ row.source or "-" }}</td>
-      {% endif %}
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+  <div class="pager">
+    {% if page > 1 %}
+      <a href="#"
+        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
+        hx-target="#tablewrap"
+        hx-push-url="true">Prev</a>
+    {% endif %}
 
-<div class="pager">
-  {% if page > 1 %}
-    <a href="#"
-       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
-       hx-target="#tablewrap"
-       hx-push-url="true">Prev</a>
-  {% endif %}
+    <span>Page {{ page }}</span>
 
-  <span>Page {{ page }}</span>
+    {% if page * page_size < total %}
+      <a href="#"
+        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
+        hx-target="#tablewrap"
+        hx-push-url="true">Next</a>
+    {% endif %}
+  </div>
 
-  {% if page * page_size < total %}
-    <a href="#"
-       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
-       hx-target="#tablewrap"
-       hx-push-url="true">Next</a>
-  {% endif %}
-</div>
+</section>
