@@ -63,18 +63,28 @@
 
   {% block scripts %}
   <script>
-    // Open drawer when HTMX swaps content into it.
-    document.body.addEventListener("htmx:afterSwap", function (evt) {
-        if (evt.target && evt.target.classList && evt.target.classList.contains("drawer")) {
-        document.body.classList.add("drawer-open");
-        }
+    function gcOpenDrawer() {
+      document.body.classList.add("drawer-open");
+      const d = document.getElementById("drawer");
+      if (d) d.setAttribute("aria-hidden", "false");
+    }
+
+    function gcCloseDrawer() {
+      document.body.classList.remove("drawer-open");
+      const d = document.getElementById("drawer");
+      if (d) d.setAttribute("aria-hidden", "true");
+    }
+
+    // ESC closes drawer
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") gcCloseDrawer();
     });
 
-    // Close when clicking backdrop
-    document.getElementById("drawerBackdrop")?.addEventListener("click", function () {
-        document.body.classList.remove("drawer-open");
-        // Optional: clear drawer content if you want it empty when closed:
-        // document.querySelector(".drawer")?.replaceChildren();
+    // If HTMX loads drawer content, ensure drawer is open
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "drawer") {
+        gcOpenDrawer();
+      }
     });
   </script>
   {% endblock %}

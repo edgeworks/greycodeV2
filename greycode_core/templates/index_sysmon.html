@@ -3,92 +3,96 @@
 
 {% block content %}
 
-<div class="ops-layout">
+<section class="card">
 
-  <section class="card">
+  <form id="filters"
+        class="controls"
+        hx-get="/ui/sysmon/{{ tab }}/table"
+        hx-target="#tablewrap"
+        hx-push-url="true"
+        hx-trigger="submit">
 
-    <form id="filters"
-          class="controls"
-          hx-get="/ui/sysmon/{{ tab }}/table"
-          hx-target="#tablewrap"
-          hx-push-url="true"
-          hx-trigger="submit">
+    <label>Search
+      <input type="text" name="q" value="{{ q }}"
+              placeholder="{% if tab==1 %}sha256 / computer / path{% elif tab==3 %}ip / computer{% else %}domain / computer{% endif %}">
+    </label>
 
-      <label>Search
-        <input type="text" name="q" value="{{ q }}"
-               placeholder="{% if tab==1 %}sha256 / computer / path{% elif tab==3 %}ip / computer{% else %}domain / computer{% endif %}">
-      </label>
+    <label>Status
+      <select name="status">
+        {% if tab == 1 %}
+          {% set statuses = ["ALL","RED","ERROR","GREY","GREEN"] %}
+        {% else %}
+          {% set statuses = ["ALL","RED","ERROR","GREY"] %}
+        {% endif %}
+        {% for s in statuses %}
+          <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
 
-      <label>Status
-        <select name="status">
-          {% if tab == 1 %}
-            {% set statuses = ["ALL","RED","ERROR","GREY","GREEN"] %}
-          {% else %}
-            {% set statuses = ["ALL","RED","ERROR","GREY"] %}
-          {% endif %}
-          {% for s in statuses %}
-            <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+    {% if tab == 1 %}
+      <label>Triage
+        <select name="triage">
+          {% for t in ["ALL","OPEN","TRIAGED"] %}
+            <option value="{{ t }}" {% if triage == t %}selected{% endif %}>{{ t }}</option>
           {% endfor %}
         </select>
       </label>
+    {% else %}
+      <label>Listing
+        <select name="listing_state">
+          {% for ls in ["ALL","PENDING","NO_LISTING","LISTED"] %}
+            <option value="{{ ls }}" {% if listing_state == ls %}selected{% endif %}>{{ ls }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    {% endif %}
+
+    <label>Page size
+      <select name="page_size">
+        {% for ps in [50,100,200,500,1000] %}
+          <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <!-- “state” kept in hidden fields -->
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="order" value="{{ order }}">
+    <input type="hidden" name="page" value="1">
+
+    <div class="actions" style="margin-top: 18px;">
+      <button class="btn primary" type="submit">Apply</button>
 
       {% if tab == 1 %}
-        <label>Triage
-          <select name="triage">
-            {% for t in ["ALL","OPEN","TRIAGED"] %}
-              <option value="{{ t }}" {% if triage == t %}selected{% endif %}>{{ t }}</option>
-            {% endfor %}
-          </select>
-        </label>
+        <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
       {% else %}
-        <label>Listing
-          <select name="listing_state">
-            {% for ls in ["ALL","PENDING","NO_LISTING","LISTED"] %}
-              <option value="{{ ls }}" {% if listing_state == ls %}selected{% endif %}>{{ ls }}</option>
-            {% endfor %}
-          </select>
-        </label>
+        <a class="btn" href="/ui/sysmon/{{tab}}?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
       {% endif %}
-
-      <label>Page size
-        <select name="page_size">
-          {% for ps in [50,100,200,500,1000] %}
-            <option value="{{ ps }}" {% if page_size == ps %}selected{% endif %}>{{ ps }}</option>
-          {% endfor %}
-        </select>
-      </label>
-
-      <!-- “state” kept in hidden fields -->
-      <input type="hidden" name="sort" value="{{ sort }}">
-      <input type="hidden" name="order" value="{{ order }}">
-      <input type="hidden" name="page" value="1">
-
-      <div class="actions" style="margin-top: 18px;">
-        <button class="btn primary" type="submit">Apply</button>
-
-        {% if tab == 1 %}
-          <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
-        {% else %}
-          <a class="btn" href="/ui/sysmon/{{tab}}?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
-        {% endif %}
-      </div>
-    </form>
-
-    <div id="tablewrap"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page={{page}}&page_size={{page_size}}"
-         hx-trigger="load">
-      <p class="muted">Loading…</p>
     </div>
+  </form>
 
-  </section>
+  <div id="tablewrap"
+        hx-get="/ui/sysmon/{{ tab }}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page={{page}}&page_size={{page_size}}"
+        hx-trigger="load">
+    <p class="muted">Loading…</p>
+  </div>
 
-  <aside class="drawer" id="drawer">
+</section>
+
+<!-- Overlay drawer + backdrop (outside the card) -->
+<div id="drawer-backdrop" class="drawer-backdrop" onclick="gcCloseDrawer()"></div>
+  
+<aside id="drawer" class="drawer-panel" aria-label="Details panel" aria-hidden="true">
+  <div class="drawer-shell">
     <div class="card">
       <h2 style="margin-top:0;">Details</h2>
       <p class="drawer-empty">Click a row to open details.</p>
+      <div class="actions" style="margin-top: 12px;">
+        <button class="btn" type="button" onclick="gcCloseDrawer()">Close</button>
+      </div>
     </div>
-  </aside>
-
-</div>
+  </div>
+</aside>
 
 {% endblock %}

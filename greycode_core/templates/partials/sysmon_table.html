@@ -82,7 +82,9 @@
 
       <tr class="{{ rowclass }} clickable"
           hx-get="/ui/sysmon/{{tab}}/row/{{ id }}"
-          hx-target="#drawer">
+          hx-target="#drawer"
+          hx-swap="innerHTML"
+          hx-on:click="gcOpenDrawer()">
 
         <td class="col-status">
           {{ row.status }}

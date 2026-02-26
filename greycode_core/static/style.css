@@ -488,3 +488,59 @@ th.sortable .sortlink:hover { text-decoration: underline; }
 
 /* Hover row */
 tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.12); }
+
+
+/* ---------------- Drawer overlay (off-canvas) ---------------- */
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 50;
+}
+
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(520px, 92vw);
+  transform: translateX(110%);
+  transition: transform 220ms ease;
+  z-index: 60;
+  padding: 18px;
+  overflow: auto;
+}
+
+.drawer-shell {
+  height: 100%;
+}
+
+/* Open state */
+body.drawer-open .drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.drawer-open .drawer-panel {
+  transform: translateX(0);
+}
+
+/* Make drawer content stretch nicely */
+.drawer-panel .card {
+  min-height: calc(100vh - 36px);
+}
+
+/* Mobile: drawer becomes full width */
+@media (max-width: 700px) {
+  .drawer-panel {
+    width: 100vw;
+    padding: 12px;
+  }
+  .drawer-panel .card {
+    border-radius: 14px;
+  }
+}
