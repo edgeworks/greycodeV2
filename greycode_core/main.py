@@ -1028,6 +1028,16 @@ async def ui_sysmon_table(
         rows.sort(key=lambda x: (x.get("listing_state") or "", x.get("last_seen") or ""), reverse=reverse)
     elif sort == "vt_state":
         rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
+    elif sort == "computer":
+        rows.sort(key=lambda x: (x.get("computer") or "").lower(), reverse=reverse)
+    elif sort == "image":
+        rows.sort(key=lambda x: (x.get("image") or "").lower(), reverse=reverse)
+    elif sort == "source":
+        rows.sort(key=lambda x: (x.get("source") or "").lower(), reverse=reverse)
+    elif sort == "computer_last":
+        rows.sort(key=lambda x: (x.get("computer_last") or "").lower(), reverse=reverse)
+    elif sort == "indicator":
+        rows.sort(key=lambda x: (x.get(indicator_field) or "").lower(), reverse=reverse)
     else:
         rows.sort(key=lambda x: x.get("last_seen") or "", reverse=reverse)
 
