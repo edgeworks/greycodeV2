@@ -75,6 +75,11 @@
       if (d) d.setAttribute("aria-hidden", "true");
     }
 
+    // Backdrop click closes drawer
+    document.addEventListener("click", function (e) {
+      if (e.target && e.target.id === "drawerBackdrop") gcCloseDrawer();
+    });
+
     // ESC closes drawer
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape") gcCloseDrawer();

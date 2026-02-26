@@ -80,17 +80,15 @@
 
 </section>
 
-<!-- Overlay drawer + backdrop (outside the card) -->
-<div id="drawer-backdrop" class="drawer-backdrop" onclick="gcCloseDrawer()"></div>
-  
-<aside id="drawer" class="drawer-panel" aria-label="Details panel" aria-hidden="true">
-  <div class="drawer-shell">
+<!-- Backdrop catches outside clicks -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+
+<!-- Off-canvas panel (HTMX will swap content into #drawer) -->
+<aside class="drawer-panel" id="drawerPanel" aria-label="Details drawer">
+  <div class="drawer-shell" id="drawer">
     <div class="card">
       <h2 style="margin-top:0;">Details</h2>
       <p class="drawer-empty">Click a row to open details.</p>
-      <div class="actions" style="margin-top: 12px;">
-        <button class="btn" type="button" onclick="gcCloseDrawer()">Close</button>
-      </div>
     </div>
   </div>
 </aside>
