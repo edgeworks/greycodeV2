@@ -94,3 +94,20 @@
 </aside>
 
 {% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+
+  <script id="gc-open-val" type="application/json">{{ (open or "")|tojson }}</script>
+  <script>
+    (function () {
+      const openVal = JSON.parse(document.getElementById("gc-open-val").textContent || '""');
+      if (!openVal) return;
+
+      document.body.addEventListener("htmx:afterSwap", function (e) {
+        if (!e.target || e.target.id !== "tablewrap") return;
+        htmx.ajax("GET", "/ui/sysmon/{{ tab }}/row/" + encodeURIComponent(openVal), "#drawer");
+      }, { once: true });
+    })();
+  </script>
+{% endblock %}

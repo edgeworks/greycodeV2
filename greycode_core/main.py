@@ -851,16 +851,15 @@ async def ui_redirect(_auth=Depends(require_login)):
 async def ui_sysmon(
     request: Request,
     event_id: int = ApiPath(..., ge=1),
-
     status: str = Query("ALL"),
     q: str = Query(""),
     sort: str = Query("last_seen"),
     order: str = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=10, le=2000),
-
     triage: str = Query("ALL"),
     listing_state: str = Query("ALL"),
+    open: str = Query("", alias="open"),  # open is a reserved keyword, so we use open_ in the function signature but "open" in the query parameter
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
@@ -902,6 +901,8 @@ async def ui_sysmon(
 
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
+
+            "open": open,
 
             "vt_enabled": vt_enabled(),
             **(await get_ui_metrics()),
@@ -1114,25 +1115,6 @@ async def ui_sysmon_row(
         },
     )
 
-@app.get("/ui/hash/{sha256}", response_class=HTMLResponse)
-async def ui_hash_detail(request: Request, sha256: str, _auth=Depends(require_login)):
-    key = f"greycode:sha256:{sha256}"
-    data = await r.hgetall(key)
-    data["vt_last_checked_fmt"] = fmt_epoch(data.get("vt_last_checked"))
-    data["vt_next_retry_at_fmt"] = fmt_epoch(data.get("vt_next_retry_at"))
-    data["vt_link"] = f"https://www.virustotal.com/gui/file/{sha256}"
-    metrics = await get_ui_metrics()
-
-    if not data:
-        return HTMLResponse("<h1>Hash not found</h1>", status_code=404)
-
-    return templates.TemplateResponse(
-        "hash_detail.html",
-        {
-            "request": request, 
-            "sha256": sha256, 
-            "data": data,
-            "vt_enabled": vt_enabled(), 
-            **(await get_ui_metrics()),
-        },
-    )
+@app.get("/ui/hash/{sha256}", include_in_schema=False)
+async def ui_hash_detail_redirect(sha256: str, _auth=Depends(require_login)):
+    return RedirectResponse(url=f"/ui/sysmon/1?open={sha256}", status_code=302)

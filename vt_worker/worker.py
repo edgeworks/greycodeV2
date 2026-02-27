@@ -103,7 +103,7 @@ async def query_virustotal(sha256: str) -> None:
 
             vt_link = f"https://www.virustotal.com/gui/file/{sha256}"
             ui_base = os.getenv("GREYCODE_UI_BASE_URL", "").rstrip("/")
-            ui_link = f"{ui_base}/ui/hash/{sha256}" if ui_base else None
+            ui_link = f"{ui_base}/ui/sysmon/1?open={sha256}" if ui_base else None
 
             alert = AlertEvent(
                 alert_type="HASH_RED",
