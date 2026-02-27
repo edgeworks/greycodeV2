@@ -10,17 +10,10 @@
   <div class="wrap">
     <header class="card header">
       <div class="brand">
-        <img class="logo" src="/site/greycode-logo.png" alt="Greycode logo" />
         <div class="title">
           <h1>Greycode</h1>
           <p>Sysmon Threat Enrichment Portal</p>
         </div>
-      </div>
-
-      <div class="chips">
-        <span class="chip">Login</span>
-        <span class="chip">TLS (internal)</span>
-        <span class="chip">FastAPI + Redis</span>
       </div>
     </header>
 
@@ -46,12 +39,15 @@
             <button class="btn primary" type="submit">Login</button>
             <a class="btn" href="/health">Health</a>
           </div>
+
+          <input type="hidden" name="next" value="{{ next or '/ui' }}" />
+
         </form>
       </section>
     </main>
 
     <footer class="footer">
-      <span class="muted">Greycode • internal service</span>
+      <span class="muted">Greycode • 2026</span>
     </footer>
   </div>
 </body>

@@ -11,6 +11,7 @@ from fastapi import Form
 from pathlib import Path
 from pydantic import BaseModel, ValidationError
 from starlette.middleware.sessions import SessionMiddleware
+from urllib.parse import quote
 import secrets
 import redis.asyncio as redis
 import uuid
@@ -53,8 +54,8 @@ UI_PASS = os.getenv("GREYCODE_UI_PASS", "")
 def require_login(request: Request):
     if request.session.get("logged_in") is True:
         return True
-    # Redirect to login page
-    raise HTTPException(status_code=303, headers={"Location": "/login"})
+    nxt = quote(str(request.url.path), safe="/?=&")
+    raise HTTPException(status_code=303, headers={"Location": f"/login?next={nxt}"})
 
 def pbkdf2_hash(password: str, *, iterations: int = 310_000, salt_bytes: int = 16) -> str:
     """
@@ -215,8 +216,8 @@ async def clear_disposition(sha256: str, actor: str = "ui") -> None:
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, err: str = ""):
-    return templates.TemplateResponse("login.html", {"request": request, "err": err})
+async def login_page(request: Request, err: str = "", next: str = "/ui"):
+    return templates.TemplateResponse("login.html", {"request": request, "err": err, "next": next})
 
 
 @app.post("/login")
@@ -224,6 +225,7 @@ async def login_submit(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    next: str = Form("/ui"),
 ):
     if not os.getenv("GREYCODE_SESSION_SECRET"):
         return JSONResponse({"detail": "GREYCODE_SESSION_SECRET not set"}, status_code=503)
@@ -238,7 +240,7 @@ async def login_submit(
 
     request.session["logged_in"] = True
     request.session["user"] = UI_USER
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=next or "/ui", status_code=303)
 
 
 @app.post("/logout")
@@ -247,9 +249,9 @@ async def logout(request: Request):
     return RedirectResponse(url="/login", status_code=303)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def portal(request: Request, _auth=Depends(require_login)):
-    return templates.TemplateResponse("portal.html", {"request": request})
+@app.get("/", include_in_schema=False)
+async def root(_auth=Depends(require_login)):
+    return RedirectResponse(url="/ui", status_code=302)
 
 
 @app.post("/enrich/process")
