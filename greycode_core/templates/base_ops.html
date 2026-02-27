@@ -92,6 +92,80 @@
       }
     });
   </script>
+  <script>
+    function gcSelectedCount() {
+      return document.querySelectorAll("#tablewrap input.rowSelect:checked").length;
+    }
+
+    function gcUpdateSelectionUI() {
+      const n = gcSelectedCount();
+      const badge = document.getElementById("selBadge");
+      const count = document.getElementById("selCount");
+      if (badge && count) {
+        count.textContent = String(n);
+        badge.hidden = (n === 0);
+      }
+    }
+
+    function gcBindBulkUI() {
+      const selectAll = document.getElementById("selectAll");
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          document.querySelectorAll("#tablewrap input.rowSelect").forEach(cb => cb.checked = selectAll.checked);
+          gcUpdateSelectionUI();
+        });
+      }
+
+      document.querySelectorAll("#tablewrap input.rowSelect").forEach(cb => {
+        cb.addEventListener("change", gcUpdateSelectionUI);
+      });
+
+      // Escalate prompt -> set hidden ticket_id then submit
+      document.querySelectorAll("[data-bulkaction='escalate']").forEach(btn => {
+        btn.addEventListener("click", function () {
+          if (gcSelectedCount() === 0) return;
+
+          const ticket = prompt("Ticket / Case ID (e.g. INC123456):");
+          if (!ticket) return;
+
+          const hidden = document.getElementById("bulkTicketId");
+          if (hidden) hidden.value = ticket.trim();
+
+          const form = document.getElementById("bulkForm");
+          if (!form) return;
+
+          // Create a temporary submit button with action=escalate
+          const tmp = document.createElement("button");
+          tmp.type = "submit";
+          tmp.name = "action";
+          tmp.value = "escalate";
+          tmp.style.display = "none";
+          form.appendChild(tmp);
+          tmp.click();
+          tmp.remove();
+        });
+      });
+
+      // Confirm delete
+      document.querySelectorAll("[data-confirm='delete']").forEach(btn => {
+        btn.addEventListener("click", function (e) {
+          const n = gcSelectedCount();
+          if (n === 0) { e.preventDefault(); return; }
+          if (!confirm(`Delete ${n} entries? This cannot be undone.`)) {
+            e.preventDefault();
+          }
+        });
+      });
+
+      gcUpdateSelectionUI();
+    }
+
+    // Bind now + after HTMX swaps the table
+    document.addEventListener("DOMContentLoaded", gcBindBulkUI);
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "tablewrap") gcBindBulkUI();
+    });
+  </script>
   {% endblock %}
 </body>
 </html>

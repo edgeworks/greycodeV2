@@ -138,3 +138,92 @@ code {
   border-color: rgba(255,255,255,0.28);
   filter: brightness(1.05);
 }
+
+/* ---------- Selection + actions menu ---------- */
+
+.tablemeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+
+.bulkmeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.selbadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(110,168,255,0.32);
+  background: rgba(110,168,255,0.14);
+  color: rgba(230,245,255,0.92);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+/* Checkbox look (screen5-ish) */
+.col-sel { width: 44px; }
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: rgba(200,200,255,0.95); /* modern browsers */
+}
+
+/* Dropdown menu (screen6-ish) */
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(10,12,20,0.92);
+  box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+  backdrop-filter: blur(12px);
+  z-index: 20;
+}
+
+.menu-title {
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.80);
+  padding: 2px 6px 8px;
+}
+
+.menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 10px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255,255,255,0.92);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.menu-item:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+}
+
+.menu-item.danger {
+  color: rgba(255,150,150,0.95);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 8px 0;
+  background: rgba(255,255,255,0.10);
+}

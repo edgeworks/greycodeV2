@@ -1,27 +1,81 @@
-<div class="tablemeta">
-  <div class="muted">
-    Results: <b>{{ total }}</b> • Page {{ page }}
-  </div>
-</div>
+<section class="card">
+  <div class="tablemeta">
+    <p class="muted" style="margin:0;">
+      Results: <b>{{ total }}</b> • Page {{ page }}
+    </p>
+    {% if tab == 1 %}
+      <div class="bulkmeta">
+        <span class="selbadge" id="selBadge" hidden>
+          <span id="selCount">0</span> selected
+        </span>
 
-{# Sort helper: toggles order if same column, otherwise defaults desc #}
-{% macro sort_link(label, key) -%}
-  {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
-  <a class="sortlink" href="#"
-     hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
-     hx-target="#tablewrap"
-     hx-push-url="true">
-    <span>{{ label }}</span>
-    {% if sort == key %}
-      <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
+        <details class="menu" id="bulkMenu">
+          <summary class="btn">Actions ▾</summary>
+
+          <div class="menu-panel">
+            <div class="menu-title">Bulk actions</div>
+
+            <button class="menu-item" type="submit" form="bulkForm" name="action" value="accept">
+              Accept (Benign)
+            </button>
+
+            <button class="menu-item" type="button" data-bulkaction="escalate">
+              Escalate…
+            </button>
+
+            <button class="menu-item" type="submit" form="bulkForm" name="action" value="clear">
+              Clear disposition
+            </button>
+
+            <button class="menu-item" type="submit" form="bulkForm" name="action" value="recheck">
+              Recheck (VT)
+            </button>
+
+            <div class="menu-sep"></div>
+
+            <button class="menu-item danger" type="submit" form="bulkForm" name="action" value="delete" data-confirm="delete">
+              Delete selected
+            </button>
+          </div>
+        </details>
+      </div>
     {% endif %}
-  </a>
-{%- endmacro %}
+  </div>
 
-<div class="tablebox">
-  <table class="opstable">
+  {% if tab == 1 %}
+    </form>
+  {% endif %}
+
+  {% if tab == 1 %}
+    <form id="bulkForm" method="post" action="/ui/bulk_action">
+      <input type="hidden" name="ticket_id" id="bulkTicketId" value="">
+  {% endif %}
+
+
+  {# Sort helper: toggles order if same column, otherwise defaults desc #}
+  {% macro sort_link(label, key) -%}
+    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+    <a class="sortlink" href="#"
+      hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
+      hx-target="#tablewrap"
+      hx-push-url="true">
+      <span>{{ label }}</span>
+      {% if sort == key %}
+        <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
+      {% endif %}
+    </a>
+  {%- endmacro %}
+
+
+  <table>
     <thead>
       <tr>
+        {% if tab == 1 %}
+          <th class="col-sel">
+            <input type="checkbox" id="selectAll" aria-label="Select all on page">
+          </th>
+        {% endif %}
+
         <th class="col-status sortable">{{ sort_link("Status","status") }}</th>
 
         {% if tab in [3,22] %}
@@ -82,9 +136,13 @@
 
       <tr class="{{ rowclass }} clickable"
           hx-get="/ui/sysmon/{{tab}}/row/{{ id }}"
-          hx-target="#drawer"
-          hx-swap="innerHTML"
-          hx-on:click="gcOpenDrawer()">
+          hx-target="#drawer">
+
+          {% if tab == 1 %}
+            <td class="col-sel">
+              <input class="rowSelect" type="checkbox" name="selected" value="{{ row.sha256 }}" aria-label="Select row">
+            </td>
+          {% endif %}
 
         <td class="col-status">
           {{ row.status }}
@@ -148,22 +206,23 @@
     {% endfor %}
     </tbody>
   </table>
-</div>
 
-<div class="pager">
-  {% if page > 1 %}
-    <a class="btn" href="#"
-       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
-       hx-target="#tablewrap"
-       hx-push-url="true">Prev</a>
-  {% endif %}
 
-  <span class="muted">Page {{ page }}</span>
+  <div class="pager">
+    {% if page > 1 %}
+      <a class="btn" href="#"
+        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
+        hx-target="#tablewrap"
+        hx-push-url="true">Prev</a>
+    {% endif %}
 
-  {% if page * page_size < total %}
-    <a class="btn" href="#"
-       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
-       hx-target="#tablewrap"
-       hx-push-url="true">Next</a>
-  {% endif %}
-</div>
+    <span class="muted">Page {{ page }}</span>
+
+    {% if page * page_size < total %}
+      <a class="btn" href="#"
+        hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
+        hx-target="#tablewrap"
+        hx-push-url="true">Next</a>
+    {% endif %}
+  </div>
+</section>
