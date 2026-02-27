@@ -106,12 +106,12 @@ tr.clickable:hover td {
 
 /* Column widths (tune as needed) */
 .col-sel { width: 34px; }
-.col-status { width: 170px; }
+.col-status { width: 180px; }
 .col-listing { width: 140px; }
 .col-count { width: 90px; }
-.col-lastseen { width: 195px; }
+.col-lastseen { width: 255px; }
 .col-computer { width: 220px; }
-.col-sha { width: 180px; }
+.col-sha { width: 200px; }
 .col-indicator { width: auto; }
 .col-source { width: 160px; }
 .col-image { width: auto; }

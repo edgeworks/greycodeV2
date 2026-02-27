@@ -30,7 +30,6 @@
         <span class="badge disp-other">{{ disp }}</span>
       {% endif %}
     {% endif %}
-    <button class="btn" type="button" onclick="gcCloseDrawer()">Close</button>
   </div>
 
   <dl style="margin-top: 12px;">
@@ -55,8 +54,7 @@
 
   <div class="actions" style="margin-top: 14px;">
     {# actions come next (RBAC). We'll wire these to POST endpoints via hx-post #}
-    {% if tab == 1 %}
-      <a class="btn" href="{{ vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
-    {% endif %}
+    <button class="btn" type="button" onclick="gcCloseDrawer()">Close Details</button>
+    
   </div>
 </div>

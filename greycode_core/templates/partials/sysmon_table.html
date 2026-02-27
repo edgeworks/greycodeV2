@@ -139,8 +139,12 @@
           hx-target="#drawer">
 
           {% if tab == 1 %}
-            <td class="col-sel">
-              <input class="rowSelect" type="checkbox" name="selected" value="{{ row.sha256 }}" aria-label="Select row">
+            <td class="col-sel" onclick="event.stopPropagation()">
+              <input type="checkbox"
+                    class="rowSelect"
+                    name="selected"
+                    value="{{ id }}"
+                    onclick="event.stopPropagation()">
             </td>
           {% endif %}
 
