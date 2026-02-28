@@ -214,6 +214,86 @@ async def clear_disposition(sha256: str, actor: str = "ui") -> None:
         },
     )
 
+async def set_disposition_ip(ip: str, disposition: str, ticket_id: str = "", note: str = "", actor: str = "ui") -> None:
+    key = f"greycode:ip:{ip}"
+    await r.hset(key, mapping={
+        "disposition": disposition,
+        "disposition_at": now_iso(),
+        "disposition_by": actor,
+        "disposition_note": note or "",
+        "ticket_id": ticket_id or "",
+    })
+
+async def clear_disposition_ip(ip: str, actor: str = "ui") -> None:
+    key = f"greycode:ip:{ip}"
+    await r.hset(key, mapping={
+        "disposition": "",
+        "disposition_at": "",
+        "disposition_by": actor,
+        "disposition_note": "",
+        "ticket_id": "",
+    })
+
+async def set_disposition_domain(domain: str, disposition: str, ticket_id: str = "", note: str = "", actor: str = "ui") -> None:
+    key = f"greycode:domain:{domain}"
+    await r.hset(key, mapping={
+        "disposition": disposition,
+        "disposition_at": now_iso(),
+        "disposition_by": actor,
+        "disposition_note": note or "",
+        "ticket_id": ticket_id or "",
+    })
+
+async def clear_disposition_domain(domain: str, actor: str = "ui") -> None:
+    key = f"greycode:domain:{domain}"
+    await r.hset(key, mapping={
+        "disposition": "",
+        "disposition_at": "",
+        "disposition_by": actor,
+        "disposition_note": "",
+        "ticket_id": "",
+    })
+
+async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HTMLResponse:
+    """
+    Resolve redis key + normalize indicator, fetch record, and render the drawer partial.
+    Returns an HTMLResponse (TemplateResponse is a subclass) suitable for HTMX swapping.
+    """
+    tab = int(tab)
+
+    if tab == 1:
+        key = f"greycode:sha256:{indicator}"
+    elif tab == 3:
+        try:
+            indicator = normalize_ip(indicator)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid IP")
+        key = f"greycode:ip:{indicator}"
+    elif tab == 22:
+        indicator = normalize_domain(indicator)
+        if not indicator:
+            raise HTTPException(status_code=400, detail="Invalid domain")
+        key = f"greycode:domain:{indicator}"
+    else:
+        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+    data = await r.hgetall(key)
+    if not data:
+        return HTMLResponse("<div class='card'><p class='muted'>Not found.</p></div>", status_code=404)
+
+    return templates.TemplateResponse(
+        "partials/sysmon_drawer.html",
+        {
+            "request": request,
+            "tab": tab,
+            "indicator": indicator,
+            "data": data,
+            "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
+            "vt_last_checked_fmt": fmt_epoch(data.get("vt_last_checked")),
+            "vt_next_retry_at_fmt": fmt_epoch(data.get("vt_next_retry_at")),
+        },
+    )
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, err: str = "", next: str = "/ui"):
@@ -686,34 +766,78 @@ async def enrich_dns_bulk(request: Request):
     )
 
 @app.post("/ui/hash/{sha256}/accept")
-async def ui_hash_accept(sha256: str, _auth=Depends(require_login)):
+async def ui_hash_accept(sha256: str, request: Request, _auth=Depends(require_login)):
     await set_disposition(sha256, "ACCEPTED", actor="ui")
-    return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
+    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/escalate")
-async def ui_hash_escalate(sha256: str, ticket_id: str = Form(...), _auth=Depends(require_login)):
+async def ui_hash_escalate(sha256: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
     ticket_id = (ticket_id or "").strip()
     if not ticket_id:
         # Redirect back if no ticket_id provided
-        return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
+        return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
     await set_disposition(sha256, "ESCALATED", ticket_id=ticket_id, actor="ui")
-    return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
+    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/clear")
-async def ui_hash_clear(sha256: str, _auth=Depends(require_login)):
+async def ui_hash_clear(sha256: str, request: Request, _auth=Depends(require_login)):
     await clear_disposition(sha256, actor="ui")
-    return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
+    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/recheck")
-async def ui_hash_recheck(sha256: str, _auth=Depends(require_login)):
+async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_login)):
     await recheck_vt_stage(sha256)
-    return RedirectResponse(url=f"/ui/hash/{sha256}", status_code=303)
+    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/delete")
-async def ui_hash_delete(sha256: str, _auth=Depends(require_login)):
+async def ui_hash_delete(sha256: str, request: Request, _auth=Depends(require_login)):
     await delete_hash_everywhere(sha256)
-    return RedirectResponse(url="/ui", status_code=303)
+    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
+
+@app.post("/ui/ip/{ip}/accept")
+async def ui_ip_accept(ip: str, request: Request, _auth=Depends(require_login)):
+    ip_norm = normalize_ip(ip)
+    await set_disposition_ip(ip_norm, "ACCEPTED", actor="ui")
+    return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
+
+@app.post("/ui/ip/{ip}/escalate")
+async def ui_ip_escalate(ip: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
+    ip_norm = normalize_ip(ip)
+    ticket_id = (ticket_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id required")
+    await set_disposition_ip(ip_norm, "ESCALATED", ticket_id=ticket_id, actor="ui")
+    return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
+
+@app.post("/ui/ip/{ip}/clear")
+async def ui_ip_clear(ip: str, request: Request, _auth=Depends(require_login)):
+    ip_norm = normalize_ip(ip)
+    await clear_disposition_ip(ip_norm, actor="ui")
+    return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
+
+
+@app.post("/ui/domain/{domain}/accept")
+async def ui_domain_accept(domain: str, request: Request, _auth=Depends(require_login)):
+    dom = normalize_domain(domain)
+    await set_disposition_domain(dom, "ACCEPTED", actor="ui")
+    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+
+@app.post("/ui/domain/{domain}/escalate")
+async def ui_domain_escalate(domain: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
+    dom = normalize_domain(domain)
+    ticket_id = (ticket_id or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="ticket_id required")
+    await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
+    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+
+@app.post("/ui/domain/{domain}/clear")
+async def ui_domain_clear(domain: str, request: Request, _auth=Depends(require_login)):
+    dom = normalize_domain(domain)
+    await clear_disposition_domain(dom, actor="ui")
+    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+
 
 @app.post("/ui/bulk_action")
 async def ui_bulk_action(
@@ -1080,40 +1204,7 @@ async def ui_sysmon_row(
     indicator: str = ApiPath(...),
     _auth=Depends(require_login),
 ):
-    tab = int(event_id)
-
-    if tab == 1:
-        key = f"greycode:sha256:{indicator}"
-    elif tab == 3:
-        try:
-            indicator = normalize_ip(indicator)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid IP")
-        key = f"greycode:ip:{indicator}"
-    elif tab == 22:
-        indicator = normalize_domain(indicator)
-        if not indicator:
-            raise HTTPException(status_code=400, detail="Invalid domain")
-        key = f"greycode:domain:{indicator}"
-    else:
-        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
-
-    data = await r.hgetall(key)
-    if not data:
-        return HTMLResponse("<div class='card'><p class='muted'>Not found.</p></div>", status_code=404)
-
-    return templates.TemplateResponse(
-        "partials/sysmon_drawer.html",
-        {
-            "request": request,
-            "tab": tab,
-            "indicator": indicator,
-            "data": data,
-            "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
-            "vt_last_checked_fmt": fmt_epoch(data.get("vt_last_checked")),
-            "vt_next_retry_at_fmt": fmt_epoch(data.get("vt_next_retry_at")),
-        },
-    )
+    return await render_sysmon_drawer(request, int(event_id), indicator)
 
 @app.get("/ui/hash/{sha256}", include_in_schema=False)
 async def ui_hash_detail_redirect(sha256: str, _auth=Depends(require_login)):
