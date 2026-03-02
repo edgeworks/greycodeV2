@@ -793,7 +793,12 @@ async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_l
 @app.post("/ui/hash/{sha256}/delete")
 async def ui_hash_delete(sha256: str, request: Request, _auth=Depends(require_login)):
     await delete_hash_everywhere(sha256)
-    return await render_sysmon_drawer(request, tab=1, indicator=sha256)
+    return  HTMLResponse(
+        "<div class='card'><p class='muted'>Deleted.</p>"
+        "<div class='actions' style='margin-top:12px;'>"
+        "<button class='btn' type='button' onclick='gcCloseDrawer()'>Close</button>"
+        "</div></div>"
+    )
 
 @app.post("/ui/ip/{ip}/accept")
 async def ui_ip_accept(ip: str, request: Request, _auth=Depends(require_login)):
@@ -821,7 +826,7 @@ async def ui_ip_clear(ip: str, request: Request, _auth=Depends(require_login)):
 async def ui_domain_accept(domain: str, request: Request, _auth=Depends(require_login)):
     dom = normalize_domain(domain)
     await set_disposition_domain(dom, "ACCEPTED", actor="ui")
-    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+    return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/escalate")
 async def ui_domain_escalate(domain: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
@@ -830,13 +835,13 @@ async def ui_domain_escalate(domain: str, request: Request, ticket_id: str = For
     if not ticket_id:
         raise HTTPException(status_code=400, detail="ticket_id required")
     await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
-    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+    return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/clear")
 async def ui_domain_clear(domain: str, request: Request, _auth=Depends(require_login)):
     dom = normalize_domain(domain)
     await clear_disposition_domain(dom, actor="ui")
-    return await render_sysmon_drawer(request, tab=2, indicator=dom)
+    return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 
 @app.post("/ui/bulk_action")
@@ -983,7 +988,7 @@ async def ui_sysmon(
     page_size: int = Query(200, ge=10, le=2000),
     triage: str = Query("ALL"),
     listing_state: str = Query("ALL"),
-    open: str = Query("", alias="open"),  # open is a reserved keyword, so we use open_ in the function signature but "open" in the query parameter
+    open: str = Query("", alias="open"),
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
