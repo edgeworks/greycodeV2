@@ -533,20 +533,29 @@ body.drawer-open .drawer-panel {
 
 /* Footer actions (sticky inside drawer) */
 .drawer-footer {
-  margin-top: auto;
+  margin-top: 14px;
+  margin-left: -18px;
+  margin-right: -18px;
+  padding-top: 12px;
+  padding-left: 18px;
+  padding-right: 18px;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
   position: sticky;
   bottom: 0;
-  padding-top: 12px;
-  background: linear-gradient(to bottom, rgba(10,12,20,0.0), rgba(10,12,20,0.85) 30%, rgba(10,12,20,0.95));
+  background: linear-gradient(to top, rgba(10,12,20,0.88) 0%, rgba(10,12,20,0.55) 65%, rgba(10,12,20,0.0) 100%);
   backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(255,255,255,0.10);
 }
 
 .drawer-actions {
+  margin: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  padding: 10px 0 0;
+  padding: 10px 0 6px;
+  justify-content: flex-start;
 }
 
 .btn.primary {
@@ -613,8 +622,13 @@ body.drawer-open .drawer-panel {
 }
 
 .drawer-panel .fact .v {
-  font-size: 0.95rem;
-  color: var(--text);
+  margin: 0;
+  padding: 0;
+  line-height: 1.25;
+}
+
+.drawer-panel .fact .v.mono.wrap {
+  line-height: 1.2;
 }
 
 .drawer-panel .fact.span2 {
