@@ -492,3 +492,101 @@ body.drawer-open .drawer-panel {
     border-radius: 14px;
   }
 }
+
+/* Drawer content layout */
+.drawer-panel .card {
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-body {
+  padding-bottom: 14px;
+}
+
+/* Facts grid instead of DL */
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin-top: 12px;
+}
+
+.fact {
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.10);
+  border-radius: 12px;
+}
+
+.fact .k {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.fact .v {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.fact.span2 { grid-column: span 2; }
+
+/* Footer actions (sticky inside drawer) */
+.drawer-footer {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  background: linear-gradient(to bottom, rgba(10,12,20,0.0), rgba(10,12,20,0.85) 30%, rgba(10,12,20,0.95));
+  backdrop-filter: blur(10px);
+}
+
+.drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0 0;
+}
+
+.btn.primary {
+  background: rgba(110,168,255,0.18);
+  border-color: rgba(110,168,255,0.34);
+}
+
+.btn.danger {
+  background: rgba(255,110,110,0.14);
+  border-color: rgba(255,110,110,0.32);
+}
+
+.btn.ghost {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.14);
+  margin-left: auto; /* pushes Close to the right */
+}
+
+/* Escalate inline form */
+.escalate {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.escalate input {
+  width: 160px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.20);
+  color: var(--text);
+  outline: none;
+}
+
+@media (max-width: 520px) {
+  .facts { grid-template-columns: 1fr; }
+  .fact.span2 { grid-column: span 1; }
+  .btn.ghost { margin-left: 0; }
+  .escalate { width: 100%; margin-left: 0; }
+  .escalate input { flex: 1; width: auto; }
+}
