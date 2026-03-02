@@ -166,6 +166,15 @@
       if (e.target && e.target.id === "tablewrap") gcBindBulkUI();
     });
   </script>
+  <script>
+    function gcRefreshTable() {
+      const tw = document.getElementById("tablewrap");
+      if (!tw) return;
+      const url = tw.getAttribute("hx-get");
+      if (!url) return;
+      htmx.ajax("GET", url, "#tablewrap");
+    }
+  </script>
   {% endblock %}
 </body>
 </html>

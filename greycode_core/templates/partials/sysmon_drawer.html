@@ -59,24 +59,24 @@
       <button class="btn"
               hx-post="/ui/hash/{{ indicator }}/accept"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Accept
       </button>
 
       <button class="btn"
               hx-post="/ui/hash/{{ indicator }}/clear"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Clear
       </button>
 
       <button class="btn"
               hx-post="/ui/hash/{{ indicator }}/recheck"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Recheck (VT)
       </button>
 
@@ -84,8 +84,8 @@
               hx-post="/ui/hash/{{ indicator }}/delete"
               hx-confirm="Delete this hash record? This cannot be undone."
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Delete
       </button>
 
@@ -93,8 +93,8 @@
       <form style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin:0;"
             hx-post="/ui/hash/{{ indicator }}/escalate"
             hx-target="#drawer"
-            hx-swap="innerHTML">
-            hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+            hx-swap="innerHTML"
+            hx-on:htmx:afterRequest="gcRefreshTable()">
         <label style="min-width: 180px;">Ticket
           <input name="ticket_id" placeholder="INC123456" required>
         </label>
@@ -105,24 +105,24 @@
       <button class="btn"
               hx-post="/ui/ip/{{ indicator }}/accept"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Accept
       </button>
 
       <button class="btn"
               hx-post="/ui/ip/{{ indicator }}/clear"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Clear
       </button>
 
       <form style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin:0;"
             hx-post="/ui/ip/{{ indicator }}/escalate"
             hx-target="#drawer"
-            hx-swap="innerHTML">
-            hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+            hx-swap="innerHTML"
+            hx-on:htmx:afterRequest="gcRefreshTable()">
         <label style="min-width: 180px;">Ticket
           <input name="ticket_id" placeholder="INC123456" required>
         </label>
@@ -133,24 +133,24 @@
       <button class="btn"
               hx-post="/ui/domain/{{ indicator }}/accept"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Accept
       </button>
 
       <button class="btn"
               hx-post="/ui/domain/{{ indicator }}/clear"
               hx-target="#drawer"
-              hx-swap="innerHTML">
-              hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
         Clear
       </button>
 
       <form style="display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin:0;"
             hx-post="/ui/domain/{{ indicator }}/escalate"
             hx-target="#drawer"
-            hx-swap="innerHTML">
-            hx-on:htmx:afterRequest="htmx.ajax('GET', document.getElementById('tablewrap').getAttribute('hx-get'), '#tablewrap')">
+            hx-swap="innerHTML"
+            hx-on:htmx:afterRequest="gcRefreshTable()">
         <label style="min-width: 180px;">Ticket
           <input name="ticket_id" placeholder="INC123456" required>
         </label>
