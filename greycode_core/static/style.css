@@ -111,6 +111,7 @@ tr.clickable:hover td {
 .col-count { width: 90px; }
 .col-lastseen { width: 255px; }
 .col-computer { width: 220px; }
+.col-computer_last { width: 340px; }
 .col-sha { width: 200px; }
 .col-indicator { width: auto; }
 .col-source { width: 160px; }
