@@ -441,6 +441,7 @@ tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.12); }
     rgba(18,20,30,0.96),
     rgba(10,12,20,0.96)
   );
+  padding: 0px;
 }
 
 .drawer-backdrop {
