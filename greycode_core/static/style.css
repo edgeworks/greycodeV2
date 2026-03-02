@@ -590,3 +590,39 @@ body.drawer-open .drawer-panel {
   .escalate { width: 100%; margin-left: 0; }
   .escalate input { flex: 1; width: auto; }
 }
+
+/* --- Drawer facts grid: force 2 columns --- */
+.drawer-panel .facts {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 10px 14px !important;
+  margin-top: 12px;
+}
+
+.drawer-panel .fact {
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(0,0,0,0.10);
+  border-radius: 12px;
+}
+
+.drawer-panel .fact .k {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.drawer-panel .fact .v {
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.drawer-panel .fact.span2 {
+  grid-column: span 2 !important;
+}
+
+/* Mobile stacks */
+@media (max-width: 520px) {
+  .drawer-panel .facts { grid-template-columns: 1fr !important; }
+  .drawer-panel .fact.span2 { grid-column: span 1 !important; }
+}
