@@ -491,6 +491,7 @@ body.drawer-open .drawer-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
+  padding-bottom: 0px;
 }
 
 .drawer-body {
@@ -550,7 +551,7 @@ body.drawer-open .drawer-panel {
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
-  padding: 10px 0 6px;
+  padding: 10px 0 24px;
   justify-content: flex-start;
 }
 
