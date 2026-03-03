@@ -493,6 +493,7 @@ body.drawer-open .drawer-panel {
   flex-direction: column;
   height: 100%;
   padding-bottom: 0px;
+  backdrop-filter: blur(10px);
 }
 
 .drawer-body {
@@ -624,6 +625,9 @@ body.drawer-open .drawer-panel {
   margin: 0;
   padding: 0;
   line-height: 1.25;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .drawer-panel .fact .v.mono.wrap {
