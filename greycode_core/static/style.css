@@ -435,15 +435,6 @@ tr.clickable:hover { outline: 1px solid rgba(255,255,255,0.12); }
 
 /* ---------------- Drawer overlay (off-canvas) ---------------- */
 
-.drawer-surface {
-  background: linear-gradient(
-    180deg,
-    rgba(18,20,30,0.96),
-    rgba(10,12,20,0.96)
-  );
-  padding: 0px;
-}
-
 .drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -523,6 +514,7 @@ body.drawer-open .drawer-panel {
   padding: 10px 12px;
   border: 1px solid rgba(255,255,255,0.10);
   background: rgba(0,0,0,0.10);
+  backdrop-filter: blur(10px);
   border-radius: 12px;
 }
 
