@@ -1,0 +1,121 @@
+{% extends "base_ops.html" %}
+{% block title %}Greycode • Settings{% endblock %}
+
+{% block content %}
+
+<div class="settings-grid">
+
+  <!-- Blacklist -->
+  <section class="card">
+    <h2 style="margin-top:0;">Blacklist</h2>
+    <p class="muted" style="margin-top:-6px;">Scheduling + vendor feeds (design only)</p>
+
+    <form class="settings-form" method="post" action="#">
+      <div class="settings-row">
+        <label>Refresh time (re-check collected indicators)
+          <input name="blacklist_refresh_time" value="{{ settings.blacklist_refresh_time }}" placeholder="e.g. */30 * * * *">
+        </label>
+
+        <label>Vendor update time (pull feeds)
+          <input name="blacklist_update_time" value="{{ settings.blacklist_update_time }}" placeholder="e.g. 0 */6 * * *">
+        </label>
+      </div>
+
+      <div class="settings-block">
+        <div class="settings-subtitle">Vendors</div>
+
+        <div class="vendor-list">
+          {% for v in settings.vendors %}
+            <div class="vendor-row">
+              <label class="switch">
+                <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
+                <span class="slider"></span>
+              </label>
+
+              <div class="vendor-name">{{ v.name }}</div>
+
+              <input class="vendor-url" name="vendor_url_{{ v.key }}" value="{{ v.url }}" placeholder="https://...">
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="button" disabled title="Wiring later">Save Blacklist</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- VirusTotal -->
+  <section class="card">
+    <h2 style="margin-top:0;">VirusTotal</h2>
+    <p class="muted" style="margin-top:-6px;">Key + budgets + enable (design only)</p>
+
+    <form class="settings-form" method="post" action="#">
+      <div class="settings-row">
+        <label>Enable VT
+          <select name="vt_enabled">
+            <option value="1" {% if settings.vt_enabled %}selected{% endif %}>Enabled</option>
+            <option value="0" {% if not settings.vt_enabled %}selected{% endif %}>Disabled</option>
+          </select>
+        </label>
+
+        <label>API key (stored masked)
+          <input type="password" name="vt_api_key" placeholder="{% if settings.vt_key_masked %}Stored: {{ settings.vt_key_masked }}{% else %}Not set{% endif %}">
+          <div class="hint muted">Leave empty to keep existing key.</div>
+        </label>
+      </div>
+
+      <div class="settings-row">
+        <label>Daily budget
+          <input type="number" min="0" step="1" name="vt_budget_daily" value="{{ settings.vt_budget_daily }}">
+        </label>
+
+        <label>Per-minute budget
+          <input type="number" min="0" step="1" name="vt_budget_per_min" value="{{ settings.vt_budget_per_min }}">
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="button" disabled title="Wiring later">Save VT</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Future -->
+  <section class="card">
+    <h2 style="margin-top:0;">Users</h2>
+    <p class="muted">Design placeholder (create/delete/roles later)</p>
+    <div class="muted">Keep this minimal: Admin / Analyst roles only.</div>
+    <div class="settings-actions" style="margin-top:12px;">
+      <button class="btn" type="button" disabled>Manage users</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 style="margin-top:0;">Notifications</h2>
+    <p class="muted">Email only (design placeholder)</p>
+
+    <form class="settings-form" method="post" action="#">
+      <div class="settings-row">
+        <label>Email notifications
+          <select name="notify_email_enabled">
+            <option value="0" {% if not settings.notify_email_enabled %}selected{% endif %}>Disabled</option>
+            <option value="1" {% if settings.notify_email_enabled %}selected{% endif %}>Enabled</option>
+          </select>
+        </label>
+
+        <label>Send to
+          <input name="notify_email_to" value="{{ settings.notify_email_to }}" placeholder="soc-alerts@...">
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="button" disabled title="Wiring later">Save Notifications</button>
+      </div>
+    </form>
+  </section>
+
+</div>
+
+{% endblock %}

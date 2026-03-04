@@ -328,6 +328,32 @@ async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
+@app.get("/ui/settings", response_class=HTMLResponse)
+async def ui_settings(request: Request, _auth=Depends(require_login)):
+    # Design-only placeholder values (later loaded from Redis settings)
+    settings = {
+        "blacklist_refresh_time": "*/30 * * * *",   # every 30 min
+        "blacklist_update_time": "0 */6 * * *",     # every 6h
+
+        "vendors": [
+            {"key": "threatfox", "name": "ThreatFox", "enabled": True,  "url": "https://threatfox.abuse.ch/downloads/ipblocklist/"},
+            {"key": "spamhaus",  "name": "Spamhaus (DROP)", "enabled": False, "url": "https://www.spamhaus.org/drop/drop.txt"},
+            {"key": "urlhaus",   "name": "URLhaus", "enabled": False, "url": "https://urlhaus.abuse.ch/downloads/text/"},
+        ],
+
+        "vt_enabled": True,
+        "vt_key_masked": "ABCD…WXYZ",  # computed later
+        "vt_budget_daily": 500,
+        "vt_budget_per_min": 3,
+
+        "notify_email_enabled": False,
+        "notify_email_to": "",
+    }
+
+    return templates.TemplateResponse(
+        "settings.html",
+        {"request": request, "tab": 0, "settings": settings, **(await get_ui_metrics()), "vt_enabled": vt_enabled()},
+    )
 
 @app.get("/", include_in_schema=False)
 async def root(_auth=Depends(require_login)):
