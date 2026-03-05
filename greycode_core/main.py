@@ -23,7 +23,8 @@ import time
 import base64
 import hashlib
 import hmac
-from typing import Optional
+from typing import Optional, Any
+from cryptography.fernet import Fernet, InvalidToken
 
 
 
@@ -97,8 +98,119 @@ async def get_ui_metrics():
         "staged_candidates": staged_candidates
     }
 
-def vt_enabled() -> bool:
-    return os.getenv("VT_ENABLED", "0") == "1"
+async def vt_enabled_setting() -> bool:
+    val = await r.hget(SETTINGS_KEY, "vt_enabled")
+    if val is None:
+        # fallback to env until settings are saved at least once
+        return os.getenv("VT_ENABLED", "0") == "1"
+    return val == "1"
+
+SETTINGS_KEY = "greycode:settings"
+VENDORS_KEY = "greycode:settings:blacklist_vendors"
+
+DEFAULT_VENDORS = [
+    {"key": "threatfox", "name": "ThreatFox", "enabled": True,
+     "url": "https://threatfox.abuse.ch/downloads/ipblocklist/"},
+    {"key": "spamhaus", "name": "Spamhaus (DROP)", "enabled": False,
+     "url": "https://www.spamhaus.org/drop/drop.txt"},
+    {"key": "urlhaus", "name": "URLhaus", "enabled": False,
+     "url": "https://urlhaus.abuse.ch/downloads/text/"},
+]
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "blacklist_refresh_time": "*/30 * * * *",
+    "blacklist_update_time": "0 */6 * * *",
+
+    "vt_enabled": "1",           # stored as string
+    "vt_budget_daily": "500",
+    "vt_budget_per_min": "3",
+    "vt_api_key_enc": "",
+
+    "notify_email_enabled": "0",
+    "notify_email_to": "",
+}
+
+
+def _fernet() -> Fernet:
+    """
+    Derive a stable Fernet key from GREYCODE_SESSION_SECRET.
+    """
+    secret = os.getenv("GREYCODE_SESSION_SECRET", "")
+    if not secret:
+        raise RuntimeError("GREYCODE_SESSION_SECRET not set (needed for settings encryption).")
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()  # 32 bytes
+    key = base64.urlsafe_b64encode(digest)  # Fernet expects urlsafe b64
+    return Fernet(key)
+
+
+def encrypt_secret(plaintext: str) -> str:
+    if not plaintext:
+        return ""
+    return _fernet().encrypt(plaintext.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_secret(ciphertext: str) -> str:
+    if not ciphertext:
+        return ""
+    try:
+        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        # If secret changed, we can't decrypt. Treat as unset.
+        return ""
+
+
+def mask_secret(s: str) -> str:
+    if not s:
+        return ""
+    if len(s) <= 8:
+        return s[0:2] + "…" + s[-2:]
+    return s[:4] + "…" + s[-4:]
+
+
+async def load_settings() -> dict[str, Any]:
+    """
+    Merge defaults + redis hash + vendor JSON.
+    All stored values are strings; UI can cast where needed.
+    """
+    stored = await r.hgetall(SETTINGS_KEY)  # str->str
+    s = {**DEFAULT_SETTINGS, **(stored or {})}
+
+    vendors_json = await r.get(VENDORS_KEY)
+    if vendors_json:
+        try:
+            vendors = json.loads(vendors_json)
+            if isinstance(vendors, list):
+                s["vendors"] = vendors
+            else:
+                s["vendors"] = DEFAULT_VENDORS
+        except Exception:
+            s["vendors"] = DEFAULT_VENDORS
+    else:
+        s["vendors"] = DEFAULT_VENDORS
+
+    # Derived display helpers
+    vt_key_plain = decrypt_secret(s.get("vt_api_key_enc") or "")
+    s["vt_key_masked"] = mask_secret(vt_key_plain)
+
+    # Convenience bool/int for templates
+    s["vt_enabled_bool"] = (s.get("vt_enabled", "0") == "1")
+    s["notify_email_enabled_bool"] = (s.get("notify_email_enabled", "0") == "1")
+
+    return s
+
+
+async def save_settings(mapping: dict[str, str]) -> None:
+    """
+    Save only known keys into the settings hash.
+    """
+    allowed = set(DEFAULT_SETTINGS.keys())
+    clean = {k: v for k, v in mapping.items() if k in allowed}
+    if clean:
+        await r.hset(SETTINGS_KEY, mapping=clean)
+
+
+async def save_vendors(vendors: list[dict[str, Any]]) -> None:
+    await r.set(VENDORS_KEY, json.dumps(vendors, ensure_ascii=False))
 
 class ProcessEvent(BaseModel):
     # Sysmon ID 1 fields (Cribl passes sha256, Computer, Image)
@@ -329,36 +441,105 @@ async def logout(request: Request):
     return RedirectResponse(url="/login", status_code=303)
 
 @app.get("/ui/settings", response_class=HTMLResponse)
-async def ui_settings(request: Request, _auth=Depends(require_login)):
-    # Design-only placeholder values (later loaded from Redis settings)
-    settings = {
-        "blacklist_refresh_time": "*/30 * * * *",   # every 30 min
-        "blacklist_update_time": "0 */6 * * *",     # every 6h
-
-        "vendors": [
-            {"key": "threatfox", "name": "ThreatFox", "enabled": True,  "url": "https://threatfox.abuse.ch/downloads/ipblocklist/"},
-            {"key": "spamhaus",  "name": "Spamhaus (DROP)", "enabled": False, "url": "https://www.spamhaus.org/drop/drop.txt"},
-            {"key": "urlhaus",   "name": "URLhaus", "enabled": False, "url": "https://urlhaus.abuse.ch/downloads/text/"},
-        ],
-
-        "vt_enabled": True,
-        "vt_key_masked": "ABCD…WXYZ",  # computed later
-        "vt_budget_daily": 500,
-        "vt_budget_per_min": 3,
-
-        "notify_email_enabled": False,
-        "notify_email_to": "",
-    }
-
+async def ui_settings(request: Request, saved: str = "", _auth=Depends(require_login)):
+    s = await load_settings()
     return templates.TemplateResponse(
         "settings.html",
-        {"request": request, "tab": 0, "settings": settings, **(await get_ui_metrics()), "vt_enabled": vt_enabled()},
+        {
+            "request": request,
+            "tab": 0,
+            "settings": s,
+            "saved": saved,
+            **(await get_ui_metrics()),
+            "vt_enabled": await vt_enabled_setting(),
+        },
     )
+
+@app.post("/ui/settings/blacklist")
+async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
+    form = await request.form()
+    refresh_time = (form.get("blacklist_refresh_time") or "").strip()
+    update_time = (form.get("blacklist_update_time") or "").strip()
+
+    # Minimal validation: keep simple; allow cron-like strings.
+    if not refresh_time:
+        refresh_time = DEFAULT_SETTINGS["blacklist_refresh_time"]
+    if not update_time:
+        update_time = DEFAULT_SETTINGS["blacklist_update_time"]
+
+    # Rebuild vendors list from submitted fields
+    s = await load_settings()
+    vendors = s.get("vendors") or DEFAULT_VENDORS
+    new_vendors = []
+    for v in vendors:
+        key = v.get("key")
+        if not key:
+            continue
+        enabled = form.get(f"vendor_enabled_{key}") is not None
+        url = (form.get(f"vendor_url_{key}") or v.get("url") or "").strip()
+        new_vendors.append({
+            "key": key,
+            "name": v.get("name") or key,
+            "enabled": bool(enabled),
+            "url": url,
+        })
+
+    await save_settings({
+        "blacklist_refresh_time": refresh_time,
+        "blacklist_update_time": update_time,
+    })
+    await save_vendors(new_vendors)
+
+    return RedirectResponse(url="/ui/settings?saved=blacklist", status_code=303)
 
 @app.get("/", include_in_schema=False)
 async def root(_auth=Depends(require_login)):
     return RedirectResponse(url="/ui", status_code=302)
 
+@app.post("/ui/settings/vt")
+async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
+    form = await request.form()
+
+    vt_enabled = "1" if (form.get("vt_enabled") == "1") else "0"
+
+    # budgets
+    def as_int_str(v: str, default: str) -> str:
+        try:
+            n = int((v or "").strip())
+            if n < 0:
+                return default
+            return str(n)
+        except Exception:
+            return default
+
+    daily = as_int_str(form.get("vt_budget_daily"), DEFAULT_SETTINGS["vt_budget_daily"])
+    per_min = as_int_str(form.get("vt_budget_per_min"), DEFAULT_SETTINGS["vt_budget_per_min"])
+
+    # API key: if empty => keep existing encrypted value
+    new_key = (form.get("vt_api_key") or "").strip()
+    mapping = {
+        "vt_enabled": vt_enabled,
+        "vt_budget_daily": daily,
+        "vt_budget_per_min": per_min,
+    }
+
+    if new_key:
+        mapping["vt_api_key_enc"] = encrypt_secret(new_key)
+
+    await save_settings(mapping)
+    return RedirectResponse(url="/ui/settings?saved=vt", status_code=303)
+
+@app.post("/ui/settings/notifications")
+async def ui_settings_notifications(request: Request, _auth=Depends(require_login)):
+    form = await request.form()
+    enabled = "1" if (form.get("notify_email_enabled") == "1") else "0"
+    to = (form.get("notify_email_to") or "").strip()
+
+    await save_settings({
+        "notify_email_enabled": enabled,
+        "notify_email_to": to,
+    })
+    return RedirectResponse(url="/ui/settings?saved=notifications", status_code=303)
 
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):
@@ -392,7 +573,7 @@ async def enrich_process(event: ProcessEvent):
         },
     )
 
-    if vt_enabled():
+    if vt_enabled_setting():
         await r.lpush(VT_QUEUE, event.sha256)
 
     return {
@@ -480,7 +661,7 @@ async def enrich_process_bulk(request: Request):
                 },
             )
 
-        if vt_enabled() and not rep:
+        if vt_enabled_setting() and not rep:
             await r.lpush(VT_QUEUE, event.sha256)
 
         accepted += 1
@@ -1059,7 +1240,7 @@ async def ui_sysmon(
 
             "open": open,
 
-            "vt_enabled": vt_enabled(),
+            "vt_enabled": vt_enabled_setting(),
             **(await get_ui_metrics()),
         },
     )

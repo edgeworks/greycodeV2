@@ -3,6 +3,12 @@
 
 {% block content %}
 
+{% if saved %}
+  <div class="banner enabled" style="margin-bottom:12px;">
+    Saved: {{ saved }}
+  </div>
+{% endif %}
+
 <div class="settings-grid">
 
   <!-- Blacklist -->
@@ -10,7 +16,7 @@
     <h2 style="margin-top:0;">Blacklist</h2>
     <p class="muted" style="margin-top:-6px;">Scheduling + vendor feeds (design only)</p>
 
-    <form class="settings-form" method="post" action="#">
+    <form class="settings-form" method="post" action="/ui/settings/blacklist">
       <div class="settings-row">
         <label>Refresh time (re-check collected indicators)
           <input name="blacklist_refresh_time" value="{{ settings.blacklist_refresh_time }}" placeholder="e.g. */30 * * * *">
@@ -41,7 +47,7 @@
       </div>
 
       <div class="settings-actions">
-        <button class="btn primary" type="button" disabled title="Wiring later">Save Blacklist</button>
+        <button class="btn primary" type="submit">Save Blacklist</button>
       </div>
     </form>
   </section>
@@ -51,7 +57,7 @@
     <h2 style="margin-top:0;">VirusTotal</h2>
     <p class="muted" style="margin-top:-6px;">Key + budgets + enable (design only)</p>
 
-    <form class="settings-form" method="post" action="#">
+    <form class="settings-form" method="post" action="/ui/settings/vt">
       <div class="settings-row">
         <label>Enable VT
           <select name="vt_enabled">
@@ -77,7 +83,7 @@
       </div>
 
       <div class="settings-actions">
-        <button class="btn primary" type="button" disabled title="Wiring later">Save VT</button>
+        <button class="btn primary" type="submit">Save VT</button>
       </div>
     </form>
   </section>
@@ -96,7 +102,7 @@
     <h2 style="margin-top:0;">Notifications</h2>
     <p class="muted">Email only (design placeholder)</p>
 
-    <form class="settings-form" method="post" action="#">
+    <form class="settings-form" method="post" action="/ui/settings/notifications">
       <div class="settings-row">
         <label>Email notifications
           <select name="notify_email_enabled">
@@ -111,7 +117,7 @@
       </div>
 
       <div class="settings-actions">
-        <button class="btn primary" type="button" disabled title="Wiring later">Save Notifications</button>
+        <button class="btn primary" type="submit">Save Notifications</button>
       </div>
     </form>
   </section>
