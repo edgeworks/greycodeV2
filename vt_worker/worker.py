@@ -3,33 +3,79 @@
 import asyncio
 import os
 import time
-from typing import Optional
+from typing import Dict, Optional
+import base64
+import hashlib
+from cryptography.fernet import Fernet, InvalidToken
 
 import httpx
 import redis.asyncio as redis
 
 from greycode_core.alerts import AlertRouter, AlertEvent
 
-
-VT_API_KEY = os.getenv("VT_API_KEY")
 VT_URL = "https://www.virustotal.com/api/v3/files/{}"
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
+CFG_KEY = "greycode:cfg"
 STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
 
-RATE_LIMIT_PER_MINUTE = int(os.getenv("VT_RATE_LIMIT_PER_MINUTE", "3"))  # free tier: 3/min
-VT_RETRY_SECONDS_429 = int(os.getenv("VT_RETRY_SECONDS_429", "120"))      # conservative backoff
-
-
-def vt_enabled() -> bool:
-    return os.getenv("VT_ENABLED", "0") == "1"
-
+# Defaults if cfg fields are missing
+DEFAULT_VT_ENABLED = False
+DEFAULT_RATE_LIMIT_PER_MIN = 3          # free tier: 3/min
+DEFAULT_RETRY_SECONDS_429 = 120         # conservative backoff
 
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 alert_router = AlertRouter()
+
+
+def _fernet() -> Fernet:
+    secret = os.getenv("GREYCODE_SESSION_SECRET", "")
+    if not secret:
+        raise RuntimeError("GREYCODE_SESSION_SECRET not set (needed to decrypt vt_api_key_enc).")
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
+
+def decrypt_secret(ciphertext: str) -> str:
+    if not ciphertext:
+        return ""
+    try:
+        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        return ""
+
+def _boolish(v: Optional[str], default: bool = False) -> bool:
+    if v is None:
+        return default
+    return v.strip().lower() in ("1", "true", "yes", "on", "enabled")
+
+
+def _intish(v: Optional[str], default: int) -> int:
+    try:
+        return int(v) if v is not None else default
+    except Exception:
+        return default
+
+
+class ConfigCache:
+    def __init__(self, ttl_sec: int = 10):
+        self.ttl_sec = ttl_sec
+        self._last = 0.0
+        self.data: Dict[str, str] = {}
+
+    async def get(self) -> Dict[str, str]:
+        now = time.time()
+        if self.data and (now - self._last) < self.ttl_sec:
+            return self.data
+        self.data = await r.hgetall(CFG_KEY)
+        self._last = now
+        return self.data
+
+
+cfg_cache = ConfigCache(ttl_sec=10)
 
 
 async def _stage_again(sha256: str) -> None:
@@ -42,7 +88,28 @@ async def _release_queue_lease(key: str) -> None:
     await r.hdel(key, "vt_queued_at")
 
 
-async def query_virustotal(sha256: str) -> None:
+async def _get_vt_runtime_config() -> dict:
+    cfg = await cfg_cache.get()
+    vt_enabled = _boolish(cfg.get("vt_enabled"), default=DEFAULT_VT_ENABLED)
+    vt_api_key = decrypt_secret((cfg.get("vt_api_key_enc") or "").strip())
+    rate_per_min = _intish(cfg.get("vt_budget_per_min"), default=DEFAULT_RATE_LIMIT_PER_MIN)
+    retry_429 = _intish(cfg.get("vt_retry_seconds_429"), default=DEFAULT_RETRY_SECONDS_429)
+
+    # Guardrails
+    if rate_per_min < 1:
+        rate_per_min = 1
+    if retry_429 < 10:
+        retry_429 = 10
+
+    return {
+        "vt_enabled": vt_enabled,
+        "vt_api_key": vt_api_key,
+        "rate_per_min": rate_per_min,
+        "retry_429": retry_429,
+    }
+
+
+async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None:
     now = time.time()
     key = f"greycode:sha256:{sha256}"
 
@@ -50,7 +117,7 @@ async def query_virustotal(sha256: str) -> None:
     prev_status = (prev.get("status") or "GREY").upper()
     already_alerted = (prev.get("alerted_red") or "") == "1"
 
-    headers = {"x-apikey": VT_API_KEY}
+    headers = {"x-apikey": api_key}
     url = VT_URL.format(sha256)
 
     try:
@@ -125,7 +192,6 @@ async def query_virustotal(sha256: str) -> None:
         return
 
     if resp.status_code == 404:
-        # Distinguish from "never checked": NOT_FOUND
         await r.hset(
             key,
             mapping={
@@ -141,12 +207,11 @@ async def query_virustotal(sha256: str) -> None:
         return
 
     if resp.status_code == 429:
-        # Expected: schedule retry rather than marking ERROR
         retry_after = resp.headers.get("Retry-After")
         if retry_after and retry_after.isdigit():
             next_retry_at = now + int(retry_after)
         else:
-            next_retry_at = now + VT_RETRY_SECONDS_429
+            next_retry_at = now + retry_429
 
         await r.hset(
             key,
@@ -164,7 +229,7 @@ async def query_virustotal(sha256: str) -> None:
         await _stage_again(sha256)
         return
 
-    # Other errors are operational errors; stage for later retry
+    # Other errors: operational errors; stage for later retry
     await r.hset(
         key,
         mapping={
@@ -181,13 +246,6 @@ async def query_virustotal(sha256: str) -> None:
 
 
 async def worker_loop() -> None:
-    # Fail-fast for a common misconfig
-    if not VT_API_KEY:
-        raise RuntimeError("VT_API_KEY is not set (required for VT worker).")
-
-    # pacing interval
-    sleep_seconds = 60.0 / max(1, RATE_LIMIT_PER_MINUTE)
-
     while True:
         item = await r.brpop(VT_QUEUE, timeout=5)
         if not item:
@@ -197,26 +255,54 @@ async def worker_loop() -> None:
         if not sha256:
             continue
 
-        if not vt_enabled():
-            # Training mode: don't call VT; don't lose candidate
+        key = f"greycode:sha256:{sha256}"
+
+        cfg = await _get_vt_runtime_config()
+        vt_enabled = cfg["vt_enabled"]
+        api_key = cfg["vt_api_key"]
+        rate_per_min = cfg["rate_per_min"]
+        retry_429 = cfg["retry_429"]
+
+        # pacing interval (read from KV)
+        sleep_seconds = 60.0 / max(1, rate_per_min)
+
+        if not vt_enabled:
+            # VT disabled: do not call VT; do not lose candidate
             await _stage_again(sha256)
-            # release lease if it exists
-            await _release_queue_lease(f"greycode:sha256:{sha256}")
+            await _release_queue_lease(key)
+            continue
+
+        if not api_key:
+            # VT enabled but key missing: mark item as ERROR-ish + backoff, re-stage
+            now = time.time()
+            await r.hset(
+                key,
+                mapping={
+                    "status": "GREY",
+                    "source": "vt",
+                    "vt_state": "ERROR",
+                    "vt_http_status": "NO_API_KEY",
+                    "vt_last_checked": str(now),
+                    "vt_next_retry_at": str(now + 300),
+                },
+            )
+            await _release_queue_lease(key)
+            await _stage_again(sha256)
             continue
 
         # Respect retry time if present (defensive; selector should already enforce)
-        data = await r.hgetall(f"greycode:sha256:{sha256}")
+        data = await r.hgetall(key)
         nra = data.get("vt_next_retry_at")
         if nra:
             try:
                 if float(nra) > time.time():
                     await _stage_again(sha256)
-                    await _release_queue_lease(f"greycode:sha256:{sha256}")
+                    await _release_queue_lease(key)
                     continue
             except ValueError:
                 pass
 
-        await query_virustotal(sha256)
+        await query_virustotal(sha256, api_key=api_key, retry_429=retry_429)
         await asyncio.sleep(sleep_seconds)
 
 

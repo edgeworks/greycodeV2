@@ -25,6 +25,7 @@ import hashlib
 import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
+from config_store import cfg_get_bool, cfg_get, cfg_set
 
 
 
@@ -38,6 +39,7 @@ STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
 STAGED_SET_IP = "greycode:staged:ip_candidates"
 STAGED_SET_DOMAIN = "greycode:staged:domain_candidates"
+CFG_KEY = "greycode:cfg"
 
 if not os.getenv("GREYCODE_SESSION_SECRET"):
     raise RuntimeError("GREYCODE_SESSION_SECRET must be set")
@@ -99,13 +101,9 @@ async def get_ui_metrics():
     }
 
 async def vt_enabled_setting() -> bool:
-    val = await r.hget(SETTINGS_KEY, "vt_enabled")
-    if val is None:
-        # fallback to env until settings are saved at least once
-        return os.getenv("VT_ENABLED", "0") == "1"
-    return val == "1"
+    # Default disabled when not set
+    return await cfg_get_bool(r, "vt_enabled", default=False)
 
-SETTINGS_KEY = "greycode:settings"
 VENDORS_KEY = "greycode:settings:blacklist_vendors"
 
 DEFAULT_VENDORS = [
@@ -121,7 +119,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "blacklist_refresh_time": "*/30 * * * *",
     "blacklist_update_time": "0 */6 * * *",
 
-    "vt_enabled": "1",           # stored as string
+    "vt_enabled": "0",           # stored as string
     "vt_budget_daily": "500",
     "vt_budget_per_min": "3",
     "vt_api_key_enc": "",
@@ -172,7 +170,7 @@ async def load_settings() -> dict[str, Any]:
     Merge defaults + redis hash + vendor JSON.
     All stored values are strings; UI can cast where needed.
     """
-    stored = await r.hgetall(SETTINGS_KEY)  # str->str
+    stored = await r.hgetall(CFG_KEY)  # str->str
     s = {**DEFAULT_SETTINGS, **(stored or {})}
 
     vendors_json = await r.get(VENDORS_KEY)
@@ -206,7 +204,7 @@ async def save_settings(mapping: dict[str, str]) -> None:
     allowed = set(DEFAULT_SETTINGS.keys())
     clean = {k: v for k, v in mapping.items() if k in allowed}
     if clean:
-        await r.hset(SETTINGS_KEY, mapping=clean)
+        await r.hset(CFG_KEY, mapping=clean)
 
 
 async def save_vendors(vendors: list[dict[str, Any]]) -> None:
@@ -573,7 +571,7 @@ async def enrich_process(event: ProcessEvent):
         },
     )
 
-    if vt_enabled_setting():
+    if await vt_enabled_setting():
         await r.lpush(VT_QUEUE, event.sha256)
 
     return {
@@ -661,7 +659,7 @@ async def enrich_process_bulk(request: Request):
                 },
             )
 
-        if vt_enabled_setting() and not rep:
+        if await vt_enabled_setting() and not rep:
             await r.lpush(VT_QUEUE, event.sha256)
 
         accepted += 1
@@ -1240,7 +1238,7 @@ async def ui_sysmon(
 
             "open": open,
 
-            "vt_enabled": vt_enabled_setting(),
+            "vt_enabled": await vt_enabled_setting(),
             **(await get_ui_metrics()),
         },
     )
