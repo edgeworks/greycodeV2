@@ -774,3 +774,55 @@ body.drawer-open .drawer-panel {
 .switch input:checked + .slider:before{
   transform: translateX(18px);
 }
+
+/* ---------- Notification banner (settings etc.) ---------- */
+
+.notice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  padding: 10px 14px;
+  margin-bottom: 14px;
+
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+
+  background: rgba(110,168,255,0.15);
+  color: rgba(255,255,255,0.95);
+
+  backdrop-filter: blur(6px);
+  animation: noticeFadeIn 120ms ease;
+}
+
+.notice-banner.success {
+  background: rgba(110,255,170,0.12);
+  border-color: rgba(110,255,170,0.25);
+}
+
+.notice-banner.warn {
+  background: rgba(255,210,110,0.14);
+  border-color: rgba(255,210,110,0.32);
+}
+
+.notice-banner.error {
+  background: rgba(255,110,110,0.14);
+  border-color: rgba(255,110,110,0.32);
+}
+
+.notice-banner .close {
+  cursor: pointer;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.notice-banner .close:hover {
+  opacity: 1;
+}
+
+/* fade animation */
+@keyframes noticeFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

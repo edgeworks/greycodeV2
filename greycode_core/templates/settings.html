@@ -4,9 +4,10 @@
 {% block content %}
 
 {% if saved %}
-  <div class="banner enabled" style="margin-bottom:12px;">
-    Saved: {{ saved }}
-  </div>
+<div id="settingsNotice" class="notice-banner success">
+  <div>Settings saved: {{ saved }}</div>
+  <div class="close" onclick="this.parentElement.remove()">✕</div>
+</div>
 {% endif %}
 
 <div class="settings-grid">
@@ -124,4 +125,19 @@
 
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function(){
+    const n = document.getElementById("settingsNotice");
+    if (!n) return;
+
+    setTimeout(() => {
+      n.style.transition = "opacity 300ms ease";
+      n.style.opacity = "0";
+      setTimeout(() => n.remove(), 300);
+    }, 5000);
+  })();
+</script>
 {% endblock %}
