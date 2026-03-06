@@ -11,7 +11,7 @@ import redis.asyncio as redis
 
 from greycode_core.alerts.router import AlertRouter
 
-from blacklist_engine import (
+from greycode_core.blacklist_engine import (
     Vendor,
     load_vendors,
     save_vendors,
