@@ -7,8 +7,8 @@ import ipaddress
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from alerts.router import AlertRouter
-from alerts.models import AlertEvent
+from greycode_core.alerts.router import AlertRouter
+from greycode_core.alerts.models import AlertEvent
 
 
 CFG_KEY = "greycode:cfg"
