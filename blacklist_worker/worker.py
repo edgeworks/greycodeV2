@@ -136,42 +136,54 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
     return (True, v)
 
 
-async def recheck_all_indicators(vendors: List[Vendor], *, batch: int) -> None:
-    """
-    Iterate all stored IP + domain records and recompute membership.
-    This is linear time; keep it simple for now.
-    """
-    # IPs
+async def recheck_all_indicators(vendors, batch):
+
     cursor = 0
     while True:
-        cursor, keys = await r.scan(cursor=cursor, match="greycode:ip:*", count=batch)
-        for key in keys:
-            ip = key.split(":", 2)[-1]
-            hits = await check_indicator_hits(r, indicator_type="ip", indicator=ip, vendors=vendors)
+        cursor, ips = await r.sscan("greycode:known:ips", cursor=cursor, count=batch)
+
+        for ip in ips:
+            hits = await check_indicator_hits(
+                r,
+                indicator_type="ip",
+                indicator=ip,
+                vendors=vendors,
+            )
+
             await update_indicator_record(
-                r, alert_router,
+                r,
+                alert_router,
                 indicator_type="ip",
                 indicator=ip,
                 hits=hits,
                 reason="periodic_recheck",
             )
+
         if cursor == 0:
             break
 
-    # Domains
+
     cursor = 0
     while True:
-        cursor, keys = await r.scan(cursor=cursor, match="greycode:domain:*", count=batch)
-        for key in keys:
-            dom = key.split(":", 2)[-1]
-            hits = await check_indicator_hits(r, indicator_type="domain", indicator=dom, vendors=vendors)
+        cursor, domains = await r.sscan("greycode:known:domains", cursor=cursor, count=batch)
+
+        for dom in domains:
+            hits = await check_indicator_hits(
+                r,
+                indicator_type="domain",
+                indicator=dom,
+                vendors=vendors,
+            )
+
             await update_indicator_record(
-                r, alert_router,
+                r,
+                alert_router,
                 indicator_type="domain",
                 indicator=dom,
                 hits=hits,
                 reason="periodic_recheck",
             )
+
         if cursor == 0:
             break
 

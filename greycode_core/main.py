@@ -750,6 +750,7 @@ async def enrich_network(event: NetworkEvent):
         },
     )
     await r.sadd(STAGED_SET_IP, ip_norm)
+    await r.sadd("greycode:known:ips", ip_norm)
 
     # >>> ingest-time blacklist check (only for new records)
     vendors = await load_vendors(r)
@@ -815,6 +816,7 @@ async def enrich_network_bulk(request: Request):
     accepted = 0
     rejected = 0
     errors = []
+    vendors = await load_vendors(r)
 
     for idx, obj in enumerate(events):
         try:
@@ -855,6 +857,16 @@ async def enrich_network_bulk(request: Request):
                 },
             )
             await r.sadd(STAGED_SET_IP, ip_norm)
+            await r.sadd("greycode:known:ips", ip_norm)
+
+            hits = await check_indicator_hits(r, indicator_type="ip", indicator=ip_norm, vendors=vendors)
+            await update_indicator_record(
+                r, alert_router,
+                indicator_type="ip",
+                indicator=ip_norm,
+                hits=hits,
+                reason="ingest_check",
+            )
 
         accepted += 1
 
@@ -909,6 +921,7 @@ async def enrich_dns(event: DnsEvent):
         },
     )
     await r.sadd(STAGED_SET_DOMAIN, domain_norm)
+    await r.sadd("greycode:known:domains", domain_norm)
 
     # >>> ingest-time blacklist check (only for new records)
     vendors = await load_vendors(r)
@@ -974,7 +987,8 @@ async def enrich_dns_bulk(request: Request):
     accepted = 0
     rejected = 0
     errors = []
-
+    vendors = await load_vendors(r)
+    
     for idx, obj in enumerate(events):
         try:
             event = DnsEvent.model_validate(obj)  # Pydantic v2
@@ -1013,6 +1027,16 @@ async def enrich_dns_bulk(request: Request):
                 },
             )
             await r.sadd(STAGED_SET_DOMAIN, domain_norm)
+            await r.sadd("greycode:known:domains", domain_norm)
+
+            hits = await check_indicator_hits(r, indicator_type="domain", indicator=domain_norm, vendors=vendors)
+            await update_indicator_record(
+                r, alert_router,
+                indicator_type="domain",
+                indicator=domain_norm,
+                hits=hits,
+                reason="ingest_check",
+            )
 
         accepted += 1
 
