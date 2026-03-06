@@ -826,3 +826,96 @@ body.drawer-open .drawer-panel {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- Settings Panel ---------- */
+
+.settings-page {
+  display: flex;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+.settings-panel {
+  width: 100%;
+  max-width: 1100px;
+  background: var(--card);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  padding: 26px 28px 30px 28px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+
+.settings-header {
+  margin-bottom: 18px;
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.settings-subtitle {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ---------- Settings Tabs ---------- */
+
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+  background: rgba(255,255,255,0.04);
+  padding: 6px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-tab.active {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+/* ---------- Settings Tabs ---------- */
+
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+  background: rgba(255,255,255,0.04);
+  padding: 6px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-tab.active {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.vendor-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+}

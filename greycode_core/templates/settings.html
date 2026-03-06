@@ -10,161 +10,217 @@
 </div>
 {% endif %}
 
-<div class="settings-grid">
+<div class="settings-page">
+  <div class="settings-panel">
 
-  <!-- Blacklist -->
-  <section class="card">
-    <h2 style="margin-top:0;">Blacklist</h2>
-    <p class="muted" style="margin-top:-6px;">Scheduling + vendor feeds (design only)</p>
-
-    <form class="settings-form" method="post" action="/ui/settings/blacklist">
-      <div class="settings-row">
-        <label>Refresh time (re-check collected indicators)
-          <input name="blacklist_refresh_time" value="{{ settings.blacklist_refresh_time }}" placeholder="e.g. */30 * * * *">
-        </label>
-
-        <label>Vendor update time (pull feeds)
-          <input name="blacklist_update_time" value="{{ settings.blacklist_update_time }}" placeholder="e.g. 0 */6 * * *">
-        </label>
+    <div class="settings-header">
+      <h1>Admin Panel</h1>
+      <div class="settings-subtitle">
+        Configure system settings, vendor feeds, and notifications
       </div>
-
-      <div class="settings-block">
-        <div class="settings-subtitle">Vendors</div>
-
-        <div class="vendor-list">
-          {% for v in settings.vendors %}
-            <div class="vendor-row">
-              <label class="switch">
-                <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
-                <span class="slider"></span>
-              </label>
-
-              <div class="vendor-name">{{ v.name }}</div>
-
-              <input class="vendor-url" name="vendor_url_{{ v.key }}" value="{{ v.url }}" placeholder="https://...">
-            </div>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div class="settings-actions">
-        <button class="btn primary" type="submit">Save Blacklist</button>
-      </div>
-    </form>
-  </section>
-
-  <!-- VirusTotal -->
-  <section class="card">
-    <h2 style="margin-top:0;">VirusTotal</h2>
-    <p class="muted" style="margin-top:-6px;">Key + budgets + enable (design only)</p>
-
-    <form class="settings-form" method="post" action="/ui/settings/vt">
-      <div class="settings-row">
-        <label>Enable VT
-          <select name="vt_enabled">
-            <option value="1" {% if settings.vt_enabled_bool %}selected{% endif %}>Enabled</option>
-            <option value="0" {% if not settings.vt_enabled_bool %}selected{% endif %}>Disabled</option>
-          </select>
-        </label>
-
-        <label>API key (stored masked)
-          <input type="password" name="vt_api_key" placeholder="{% if settings.vt_key_masked %}Stored: {{ settings.vt_key_masked }}{% else %}Not set{% endif %}">
-          <div class="hint muted">Leave empty to keep existing key.</div>
-        </label>
-      </div>
-
-      <div class="settings-row">
-        <label>Daily budget
-          <input type="number" min="0" step="1" name="vt_budget_daily" value="{{ settings.vt_budget_daily }}">
-        </label>
-
-        <label>Per-minute budget
-          <input type="number" min="0" step="1" name="vt_budget_per_min" value="{{ settings.vt_budget_per_min }}">
-        </label>
-      </div>
-
-      <div class="settings-actions">
-        <button class="btn primary" type="submit">Save VT</button>
-      </div>
-    </form>
-  </section>
-
-  <!-- Future -->
-  <section class="card">
-    <h2 style="margin-top:0;">Users</h2>
-    <p class="muted">Design placeholder (create/delete/roles later)</p>
-    <div class="muted">Keep this minimal: Admin / Analyst roles only.</div>
-    <div class="settings-actions" style="margin-top:12px;">
-      <button class="btn" type="button" disabled>Manage users</button>
     </div>
-  </section>
 
-  <!-- Notifications -->
-  <section class="card">
-    <h2 style="margin-top:0;">Notifications</h2>
-    <p class="muted">Email only for now</p>
+    <div class="settings-tabs">
+      <div class="settings-tab active">Database</div>
+      <div class="settings-tab">Users</div>
+      <div class="settings-tab">Notifications</div>
+    </div>
 
-    <form class="settings-form" method="post" action="/ui/settings/notifications">
-      <div class="settings-row">
-        <label>Email notifications
-          <select name="notify_email_enabled">
-            <option value="1" {% if settings.notify_email_enabled_bool %}selected{% endif %}>Enabled</option>
-            <option value="0" {% if not settings.notify_email_enabled_bool %}selected{% endif %}>Disabled</option>
-          </select>
-        </label>
+    <!-- Blacklist -->
+    <section class="settings-section">
+      <h2>Blacklist</h2>
+      <p class="muted">Vendor feeds and refresh scheduling</p>
 
-        <label>Recipients
-          <input name="notify_email_to" value="{{ settings.notify_email_to }}" placeholder="soc@example.org, oncall@example.org">
-        </label>
-      </div>
+      <form class="settings-form" method="post" action="/ui/settings/blacklist">
+        <div class="settings-grid">
+          <label>Update interval (minutes)
+            <input
+              type="number"
+              name="blacklist_update_interval_min"
+              min="5"
+              max="1440"
+              value="{{ settings.blacklist_update_interval_min or 60 }}"
+              placeholder="60">
+          </label>
 
-      <div class="settings-row">
-        <label>From
-          <input name="notify_email_from" value="{{ settings.notify_email_from }}" placeholder="greycode@localhost">
-        </label>
+          <label>Recheck batch size
+            <input
+              type="number"
+              name="blacklist_recheck_batch"
+              min="200"
+              max="20000"
+              step="100"
+              value="{{ settings.blacklist_recheck_batch or 2000 }}"
+              placeholder="2000">
+          </label>
+        </div>
 
-        <label>Subject prefix
-          <input name="notify_email_subject_prefix" value="{{ settings.notify_email_subject_prefix }}" placeholder="[Greycode]">
-        </label>
-      </div>
+        <div class="settings-block">
+          <div class="settings-subtitle">Vendors</div>
 
-      <div class="settings-row">
-        <label>SMTP host
-          <input name="notify_smtp_host" value="{{ settings.notify_smtp_host }}" placeholder="smtp.example.org">
-        </label>
+          <div class="vendor-list">
+            {% for v in settings.vendors %}
+              <div class="vendor-row">
+                <label class="switch">
+                  <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
+                  <span class="slider"></span>
+                </label>
 
-        <label>SMTP port
-          <input type="number" min="1" step="1" name="notify_smtp_port" value="{{ settings.notify_smtp_port }}">
-        </label>
-      </div>
+                <div class="vendor-name">{{ v.name }}</div>
 
-      <div class="settings-row">
-        <label>SMTP user
-          <input name="notify_smtp_user" value="{{ settings.notify_smtp_user }}" placeholder="optional">
-        </label>
+                <input
+                  class="vendor-url"
+                  name="vendor_url_{{ v.key }}"
+                  value="{{ v.url }}"
+                  placeholder="https://...">
+              </div>
+            {% endfor %}
+          </div>
+        </div>
 
-        <label>SMTP password
-          <input type="password" name="notify_smtp_pass"
-                placeholder="{% if settings.notify_smtp_pass_masked %}Password stored{% else %}Not set{% endif %}">
-          <div class="hint muted">Leave empty to keep existing password.</div>
-        </label>
-      </div>
+        <div class="settings-actions">
+          <button class="btn primary" type="submit">Save Blacklist</button>
+        </div>
+      </form>
+    </section>
 
-      <div class="settings-row">
-        <label>STARTTLS
-          <select name="notify_smtp_starttls">
-            <option value="1" {% if settings.notify_smtp_starttls == "1" %}selected{% endif %}>Enabled</option>
-            <option value="0" {% if settings.notify_smtp_starttls != "1" %}selected{% endif %}>Disabled</option>
-          </select>
-        </label>
-      </div>
+    <!-- VirusTotal -->
+    <section class="settings-section">
+      <h2>VirusTotal</h2>
+      <p class="muted">Key, budgets, and runtime enablement</p>
 
+      <form class="settings-form" method="post" action="/ui/settings/vt">
+        <div class="settings-grid">
+          <label>Enable VT
+            <select name="vt_enabled">
+              <option value="1" {% if settings.vt_enabled_bool %}selected{% endif %}>Enabled</option>
+              <option value="0" {% if not settings.vt_enabled_bool %}selected{% endif %}>Disabled</option>
+            </select>
+          </label>
+
+          <label>API key (stored masked)
+            <input
+              type="password"
+              name="vt_api_key"
+              placeholder="{% if settings.vt_key_masked %}Stored: {{ settings.vt_key_masked }}{% else %}Not set{% endif %}">
+            <div class="hint muted">Leave empty to keep existing key.</div>
+          </label>
+
+          <label>Daily budget
+            <input
+              type="number"
+              min="0"
+              step="1"
+              name="vt_budget_daily"
+              value="{{ settings.vt_budget_daily }}">
+          </label>
+
+          <label>Per-minute budget
+            <input
+              type="number"
+              min="0"
+              step="1"
+              name="vt_budget_per_min"
+              value="{{ settings.vt_budget_per_min }}">
+          </label>
+        </div>
+
+        <div class="settings-actions">
+          <button class="btn primary" type="submit">Save VT</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Notifications -->
+    <section class="settings-section">
+      <h2>Notifications</h2>
+      <p class="muted">Email only for now</p>
+
+      <form class="settings-form" method="post" action="/ui/settings/notifications">
+        <div class="settings-grid">
+          <label>Email notifications
+            <select name="notify_email_enabled">
+              <option value="1" {% if settings.notify_email_enabled_bool %}selected{% endif %}>Enabled</option>
+              <option value="0" {% if not settings.notify_email_enabled_bool %}selected{% endif %}>Disabled</option>
+            </select>
+          </label>
+
+          <label>Recipients
+            <input
+              name="notify_email_to"
+              value="{{ settings.notify_email_to }}"
+              placeholder="soc@example.org, oncall@example.org">
+          </label>
+
+          <label>From
+            <input
+              name="notify_email_from"
+              value="{{ settings.notify_email_from }}"
+              placeholder="greycode@localhost">
+          </label>
+
+          <label>Subject prefix
+            <input
+              name="notify_email_subject_prefix"
+              value="{{ settings.notify_email_subject_prefix }}"
+              placeholder="[Greycode]">
+          </label>
+
+          <label>SMTP host
+            <input
+              name="notify_smtp_host"
+              value="{{ settings.notify_smtp_host }}"
+              placeholder="smtp.example.org">
+          </label>
+
+          <label>SMTP port
+            <input
+              type="number"
+              min="1"
+              step="1"
+              name="notify_smtp_port"
+              value="{{ settings.notify_smtp_port }}">
+          </label>
+
+          <label>SMTP user
+            <input
+              name="notify_smtp_user"
+              value="{{ settings.notify_smtp_user }}"
+              placeholder="optional">
+          </label>
+
+          <label>SMTP password
+            <input
+              type="password"
+              name="notify_smtp_pass"
+              placeholder="{% if settings.notify_smtp_pass_masked %}Password stored{% else %}Not set{% endif %}">
+            <div class="hint muted">Leave empty to keep existing password.</div>
+          </label>
+
+          <label>STARTTLS
+            <select name="notify_smtp_starttls">
+              <option value="1" {% if settings.notify_smtp_starttls == "1" %}selected{% endif %}>Enabled</option>
+              <option value="0" {% if settings.notify_smtp_starttls != "1" %}selected{% endif %}>Disabled</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="settings-actions">
+          <button class="btn primary" type="submit">Save Notifications</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Users -->
+    <section class="settings-section">
+      <h2>Users</h2>
+      <p class="muted">Placeholder for account creation, deletion, and role assignment.</p>
       <div class="settings-actions">
-        <button class="btn primary" type="submit">Save Notifications</button>
+        <button class="btn" type="button" disabled>Manage users</button>
       </div>
-    </form>
-  </section>
+    </section>
 
+  </div>
 </div>
 
 {% endblock %}
