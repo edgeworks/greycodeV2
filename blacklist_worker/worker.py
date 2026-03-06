@@ -9,7 +9,7 @@ from typing import List, Tuple
 import httpx
 import redis.asyncio as redis
 
-from alerts.router import AlertRouter
+from greycode_core.alerts import AlertRouter
 
 from blacklist_engine import (
     Vendor,

@@ -12,7 +12,7 @@ RUN if [ -n "$PIP_PROXY" ]; then \
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
 
-COPY greycode_core/ /app/
+COPY greycode_core/ /app/greycode_core/
 COPY blacklist_worker/ /app/blacklist_worker/
 
 CMD ["python", "blacklist_worker/worker.py"]
