@@ -7,8 +7,14 @@ import ipaddress
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
-from greycode_core.alerts.router import AlertRouter
-from greycode_core.alerts.models import AlertEvent
+try:
+    # worker containers: /app/greycode_core/...
+    from greycode_core.alerts.router import AlertRouter
+    from greycode_core.alerts.models import AlertEvent
+except ModuleNotFoundError:
+    # core container: /app/alerts/...
+    from alerts.router import AlertRouter
+    from alerts.models import AlertEvent
 
 
 CFG_KEY = "greycode:cfg"

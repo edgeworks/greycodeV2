@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 ENV PYTHONPATH=/app
 
-COPY ./greycode_core ./
+#COPY ./greycode_core ./
+COPY greycode_core/ /app/greycode_core/
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
