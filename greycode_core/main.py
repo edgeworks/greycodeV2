@@ -27,7 +27,7 @@ from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
 from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record
-from greycode_core.alerts import AlertRouter
+from alerts.router import AlertRouter
 
 
 

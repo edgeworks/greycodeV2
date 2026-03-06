@@ -5,9 +5,10 @@ import json
 import time
 import ipaddress
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-from greycode_core.alerts import AlertRouter, AlertEvent
+from alerts.router import AlertRouter
+from alerts.models import AlertEvent
 
 
 CFG_KEY = "greycode:cfg"
