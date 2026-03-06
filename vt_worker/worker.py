@@ -174,8 +174,10 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
 
             alert = AlertEvent(
                 alert_type="HASH_RED",
-                sha256=sha256,
                 status="RED",
+                indicator_type="sha256",
+                indicator=sha256,
+                sha256=sha256,
                 vt_malicious=malicious,
                 vt_suspicious=suspicious,
                 computer=computer,

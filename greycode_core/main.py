@@ -26,6 +26,8 @@ import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
+from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record
+from greycode_core.alerts import AlertRouter
 
 
 
@@ -35,6 +37,8 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.mount("/site", StaticFiles(directory=str(BASE_DIR / "static_site")), name="site")
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 templates = Jinja2Templates(directory="templates")
+alert_router = AlertRouter()
+
 STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
 STAGED_SET_IP = "greycode:staged:ip_candidates"
@@ -126,6 +130,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
     "notify_email_enabled": "0",
     "notify_email_to": "",
+    "notify_email_from": "greycode@localhost",
+    "notify_email_subject_prefix": "[Greycode]",
+    "notify_smtp_host": "",
+    "notify_smtp_port": "25",
+    "notify_smtp_user": "",
+    "notify_smtp_pass_enc": "",
+    "notify_smtp_starttls": "0",
 }
 
 
@@ -189,6 +200,7 @@ async def load_settings() -> dict[str, Any]:
     # Derived display helpers
     vt_key_plain = decrypt_secret(s.get("vt_api_key_enc") or "")
     s["vt_key_masked"] = mask_secret(vt_key_plain)
+    s["notify_smtp_pass_masked"] = "stored" if (s.get("notify_smtp_pass_enc") or "") else ""
 
     # Convenience bool/int for templates
     s["vt_enabled_bool"] = (s.get("vt_enabled", "0") == "1")
@@ -530,13 +542,34 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
 @app.post("/ui/settings/notifications")
 async def ui_settings_notifications(request: Request, _auth=Depends(require_login)):
     form = await request.form()
-    enabled = "1" if (form.get("notify_email_enabled") == "1") else "0"
-    to = (form.get("notify_email_to") or "").strip()
 
-    await save_settings({
+    enabled = "1" if (form.get("notify_email_enabled") == "1") else "0"
+    email_to = (form.get("notify_email_to") or "").strip()
+    email_from = (form.get("notify_email_from") or "").strip()
+    subject_prefix = (form.get("notify_email_subject_prefix") or "[Greycode]").strip()
+
+    smtp_host = (form.get("notify_smtp_host") or "").strip()
+    smtp_port = (form.get("notify_smtp_port") or "25").strip()
+    smtp_user = (form.get("notify_smtp_user") or "").strip()
+    smtp_starttls = "1" if (form.get("notify_smtp_starttls") == "1") else "0"
+
+    mapping = {
         "notify_email_enabled": enabled,
-        "notify_email_to": to,
-    })
+        "notify_email_to": email_to,
+        "notify_email_from": email_from,
+        "notify_email_subject_prefix": subject_prefix,
+        "notify_smtp_host": smtp_host,
+        "notify_smtp_port": smtp_port,
+        "notify_smtp_user": smtp_user,
+        "notify_smtp_starttls": smtp_starttls,
+    }
+
+    # Leave empty to keep existing password
+    smtp_pass = (form.get("notify_smtp_pass") or "").strip()
+    if smtp_pass:
+        mapping["notify_smtp_pass_enc"] = encrypt_secret(smtp_pass)
+
+    await save_settings(mapping)
     return RedirectResponse(url="/ui/settings?saved=notifications", status_code=303)
 
 @app.post("/enrich/process")
@@ -718,6 +751,17 @@ async def enrich_network(event: NetworkEvent):
     )
     await r.sadd(STAGED_SET_IP, ip_norm)
 
+    # >>> ingest-time blacklist check (only for new records)
+    vendors = await load_vendors(r)
+    hits = await check_indicator_hits(r, indicator_type="ip", indicator=ip_norm, vendors=vendors)
+    await update_indicator_record(
+        r, alert_router,
+        indicator_type="ip",
+        indicator=ip_norm,
+        hits=hits,
+        reason="ingest_check",
+    )
+
     return {
         "destination_ip": ip_norm,
         "status": "GREY",
@@ -865,6 +909,17 @@ async def enrich_dns(event: DnsEvent):
         },
     )
     await r.sadd(STAGED_SET_DOMAIN, domain_norm)
+
+    # >>> ingest-time blacklist check (only for new records)
+    vendors = await load_vendors(r)
+    hits = await check_indicator_hits(r, indicator_type="domain", indicator=domain_norm, vendors=vendors)
+    await update_indicator_record(
+        r, alert_router,
+        indicator_type="domain",
+        indicator=domain_norm,
+        hits=hits,
+        reason="ingest_check",
+    )
 
     return {
         "query_name": domain_norm,
