@@ -465,6 +465,30 @@ async def ui_settings(request: Request, saved: str = "", _auth=Depends(require_l
         },
     )
 
+def settings_partial_for(tab: str) -> str:
+    if tab == "notifications":
+        return "partials/settings_tab_notifications.html"
+    if tab == "users":
+        return "partials/settings_tab_users.html"
+    return "partials/settings_tab_blacklist.html"
+
+
+
+@app.get("/ui/settings/tab/{tab_name}", response_class=HTMLResponse)
+async def ui_settings_tab(
+    request: Request,
+    tab_name: str,
+    _auth=Depends(require_login),
+):
+    s = await load_settings()
+    return templates.TemplateResponse(
+        settings_partial_for(tab_name),
+        {
+            "request": request,
+            "settings": s,
+        },
+    )
+
 @app.post("/ui/settings/blacklist")
 async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
     form = await request.form()
@@ -500,7 +524,18 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
     })
     await save_vendors(new_vendors)
 
-    return RedirectResponse(url="/ui/settings?saved=blacklist", status_code=303)
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": "blacklist",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            **(await get_ui_metrics()),
+        },
+    )
 
 @app.get("/", include_in_schema=False)
 async def root(_auth=Depends(require_login)):
@@ -537,7 +572,18 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
         mapping["vt_api_key_enc"] = encrypt_secret(new_key)
 
     await save_settings(mapping)
-    return RedirectResponse(url="/ui/settings?saved=vt", status_code=303)
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": "blacklist",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            **(await get_ui_metrics()),
+        },
+    )
 
 @app.post("/ui/settings/notifications")
 async def ui_settings_notifications(request: Request, _auth=Depends(require_login)):
@@ -570,7 +616,38 @@ async def ui_settings_notifications(request: Request, _auth=Depends(require_logi
         mapping["notify_smtp_pass_enc"] = encrypt_secret(smtp_pass)
 
     await save_settings(mapping)
-    return RedirectResponse(url="/ui/settings?saved=notifications", status_code=303)
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": "notifications",
+            "settings_tab": "notifications",
+            "settings_partial": settings_partial_for("notifications"),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.get("/ui/settings/modal", response_class=HTMLResponse)
+async def ui_settings_modal(
+    request: Request,
+    saved: str = "",
+    tab: str = "blacklist",
+    _auth=Depends(require_login),
+):
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": saved,
+            "settings_tab": tab,
+            "settings_partial": settings_partial_for(tab),
+            **(await get_ui_metrics()),
+        },
+    )
 
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):

@@ -1,0 +1,61 @@
+<section class="settings-section">
+  <h2>Blacklist</h2>
+  <p class="muted">Vendor feeds and refresh scheduling</p>
+
+  <form
+    class="settings-form"
+    hx-post="/ui/settings/blacklist"
+    hx-target="#settingsModalContent"
+    hx-swap="innerHTML">
+
+    <div class="settings-grid">
+      <label>Update interval (minutes)
+        <input
+          type="number"
+          name="blacklist_update_interval_min"
+          min="5"
+          max="1440"
+          value="{{ settings.blacklist_update_interval_min or 60 }}"
+          placeholder="60">
+      </label>
+
+      <label>Recheck batch size
+        <input
+          type="number"
+          name="blacklist_recheck_batch"
+          min="200"
+          max="20000"
+          step="100"
+          value="{{ settings.blacklist_recheck_batch or 2000 }}"
+          placeholder="2000">
+      </label>
+    </div>
+
+    <div class="settings-block">
+      <div class="settings-subtitle">Vendors</div>
+
+      <div class="vendor-list">
+        {% for v in settings.vendors %}
+          <div class="vendor-row">
+            <label class="switch">
+              <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+
+            <div class="vendor-name">{{ v.name }}</div>
+
+            <input
+              class="vendor-url"
+              name="vendor_url_{{ v.key }}"
+              value="{{ v.url }}"
+              placeholder="https://...">
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save Blacklist</button>
+    </div>
+  </form>
+</section>

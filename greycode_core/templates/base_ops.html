@@ -25,7 +25,14 @@
 
         <!-- placeholder for future icons -->
         <div class="ops-actions">
-          <a class="iconbtn" href="/ui/settings" title="Settings" aria-label="Settings">⚙</a>
+          <a class="iconbtn"
+            href="/ui/settings"
+            hx-get="/ui/settings/modal"
+            hx-target="#settingsModalContent"
+            hx-swap="innerHTML"
+            hx-on:click="event.preventDefault()"
+            title="Settings"
+            aria-label="Settings">⚙</a>
           <a class="iconbtn" href="#" title="Profile" aria-label="Profile">👤</a>
           <form method="post" action="/logout" style="margin:0;">
             <button class="iconbtn" type="submit" title="Logout" aria-label="Logout">⎋</button>
@@ -61,6 +68,14 @@
 
   <div id="drawerBackdrop" class="drawer-backdrop"></div>
 
+  <div id="settingsModalBackdrop" class="settings-modal-backdrop" onclick="gcCloseSettingsModal()"></div>
+
+  <div id="settingsModalPanel" class="settings-modal-panel" aria-hidden="true">
+    <div id="settingsModalContent" class="settings-modal-content">
+      <!-- HTMX loads settings partial here -->
+    </div>
+  </div>
+
   {% block scripts %}
   <script>
     function gcOpenDrawer() {
@@ -89,6 +104,32 @@
     document.body.addEventListener("htmx:afterSwap", function (e) {
       if (e.target && e.target.id === "drawer") {
         gcOpenDrawer();
+      }
+    });
+  </script>
+  <script>
+    function gcOpenSettingsModal() {
+      document.body.classList.add("settings-modal-open");
+      const p = document.getElementById("settingsModalPanel");
+      if (p) p.setAttribute("aria-hidden", "false");
+    }
+
+    function gcCloseSettingsModal() {
+      document.body.classList.remove("settings-modal-open");
+      const p = document.getElementById("settingsModalPanel");
+      if (p) p.setAttribute("aria-hidden", "true");
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        gcCloseDrawer();
+        gcCloseSettingsModal();
+      }
+    });
+
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "settingsModalContent") {
+        gcOpenSettingsModal();
       }
     });
   </script>

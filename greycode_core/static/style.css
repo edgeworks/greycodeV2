@@ -919,3 +919,105 @@ body.drawer-open .drawer-panel {
   align-items: center;
   margin-top: 10px;
 }
+
+/* ---------- Settings modal overlay ---------- */
+
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.50);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 80;
+}
+
+.settings-modal-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 81;
+  overflow-y: auto;
+}
+
+.settings-modal-content {
+  width: 100%;
+  max-width: 1100px;
+}
+
+body.settings-modal-open .settings-modal-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.settings-modal-open .settings-modal-panel {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* modal-specific panel look */
+.settings-modal-shell {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  padding: 24px 26px 28px;
+}
+
+.settings-modal-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.settings-modal-topbar h1 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.settings-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.settings-modal-close:hover {
+  filter: brightness(1.08);
+}
+
+.settings-modal-shell {
+  animation: settingsFadeIn 160ms ease;
+}
+
+@keyframes settingsFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.settings-tab {
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}

@@ -1,0 +1,53 @@
+<div class="settings-modal-shell">
+
+  {% if saved %}
+  <div id="settingsNotice" class="notice-banner success">
+    <div>Settings saved: {{ saved }}</div>
+    <div class="close" onclick="this.parentElement.remove()">✕</div>
+  </div>
+  {% endif %}
+
+  <div class="settings-modal-topbar">
+    <div>
+      <h1>Admin Panel</h1>
+      <div class="settings-subtitle">
+        Configure system settings, vendor feeds, and notifications
+      </div>
+    </div>
+
+    <button class="settings-modal-close" type="button" onclick="gcCloseSettingsModal()">✕</button>
+  </div>
+
+  <div class="settings-tabs">
+    <button
+      class="settings-tab {% if settings_tab == 'blacklist' %}active{% endif %}"
+      hx-get="/ui/settings/tab/blacklist"
+      hx-target="#settingsTabContent"
+      hx-swap="innerHTML"
+      type="button">
+      Database
+    </button>
+
+    <button
+      class="settings-tab {% if settings_tab == 'users' %}active{% endif %}"
+      hx-get="/ui/settings/tab/users"
+      hx-target="#settingsTabContent"
+      hx-swap="innerHTML"
+      type="button">
+      Users
+    </button>
+
+    <button
+      class="settings-tab {% if settings_tab == 'notifications' %}active{% endif %}"
+      hx-get="/ui/settings/tab/notifications"
+      hx-target="#settingsTabContent"
+      hx-swap="innerHTML"
+      type="button">
+      Notifications
+    </button>
+  </div>
+
+  <div id="settingsTabContent">
+    {% include settings_partial %}
+  </div>
+</div>
