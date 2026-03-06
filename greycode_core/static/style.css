@@ -925,7 +925,7 @@ body.drawer-open .drawer-panel {
 .settings-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.50);
+  background: rgba(0,0,0,0.65);
   opacity: 0;
   pointer-events: none;
   transition: opacity 160ms ease;
@@ -963,8 +963,8 @@ body.settings-modal-open .settings-modal-panel {
 
 /* modal-specific panel look */
 .settings-modal-shell {
-  background: var(--card);
-  border: 1px solid var(--border);
+  background: #111827;
+  border: 1px solid rgba(255,255,255,0.10);
   border-radius: 18px;
   box-shadow: 0 18px 50px rgba(0,0,0,0.45);
   padding: 24px 26px 28px;
@@ -1020,4 +1020,39 @@ body.settings-modal-open .settings-modal-panel {
   background: transparent;
   font: inherit;
   cursor: pointer;
+}
+
+/* Settings forms: make grid items shrink properly */
+.settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-grid > label,
+.settings-row > label {
+  min-width: 0;
+}
+
+.settings-grid input,
+.settings-grid select,
+.settings-row input,
+.settings-row select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Make labels stack cleanly */
+.settings-grid label,
+.settings-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Mobile / narrow modal */
+@media (max-width: 900px) {
+  .settings-grid,
+  .settings-row {
+    grid-template-columns: 1fr;
+  }
 }
