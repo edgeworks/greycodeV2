@@ -951,12 +951,12 @@ body.drawer-open .drawer-panel {
   max-width: 1100px;
 }
 
-body.settings-modal-open .settings-modal-backdrop {
+body.settings-modal-open #settingsModalBackdrop {
   opacity: 1;
   pointer-events: auto;
 }
 
-body.settings-modal-open .settings-modal-panel {
+body.settings-modal-open #settingsModalPanel {
   opacity: 1;
   pointer-events: auto;
 }
