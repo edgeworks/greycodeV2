@@ -12,6 +12,8 @@ import httpx
 import redis.asyncio as redis
 
 from greycode_core.alerts import AlertRouter, AlertEvent
+from greycode_core.indexes import update_sha256_indexes
+
 
 VT_URL = "https://www.virustotal.com/api/v3/files/{}"
 
@@ -21,6 +23,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 CFG_KEY = "greycode:cfg"
 STAGED_SET = "greycode:staged:vt_candidates"
 VT_QUEUE = "greycode:queue:vt"
+KNOWN_SHA256_SET = "greycode:known:sha256"
 
 # Defaults if cfg fields are missing
 DEFAULT_VT_ENABLED = False
@@ -39,6 +42,7 @@ def _fernet() -> Fernet:
     key = base64.urlsafe_b64encode(digest)
     return Fernet(key)
 
+
 def decrypt_secret(ciphertext: str) -> str:
     if not ciphertext:
         return ""
@@ -46,6 +50,7 @@ def decrypt_secret(ciphertext: str) -> str:
         return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except InvalidToken:
         return ""
+
 
 def _boolish(v: Optional[str], default: bool = False) -> bool:
     if v is None:
@@ -79,13 +84,43 @@ cfg_cache = ConfigCache(ttl_sec=10)
 
 
 async def _stage_again(sha256: str) -> None:
-    # SET semantics (dedupe) is what we want for staged candidates.
     await r.sadd(STAGED_SET, sha256)
 
 
 async def _release_queue_lease(key: str) -> None:
-    # selector uses vt_queued_at as a lease; release it when we are done (or backing off)
     await r.hdel(key, "vt_queued_at")
+
+
+async def _sync_sha256_indexes(sha256: str, *, fallback_ts: Optional[float] = None) -> None:
+    """
+    Keep UI indexes in sync with the canonical hash record.
+    Uses last_seen if available, otherwise vt_last_checked, otherwise now/fallback_ts.
+    """
+    key = f"greycode:sha256:{sha256}"
+    data = await r.hgetall(key)
+    if not data:
+        return
+
+    await r.sadd(KNOWN_SHA256_SET, sha256)
+
+    last_seen_epoch: float
+    last_seen_iso = (data.get("last_seen") or "").strip()
+    if last_seen_iso:
+        try:
+            last_seen_epoch = __import__("datetime").datetime.fromisoformat(last_seen_iso).timestamp()
+        except Exception:
+            last_seen_epoch = float(data.get("vt_last_checked") or fallback_ts or time.time())
+    else:
+        last_seen_epoch = float(data.get("vt_last_checked") or fallback_ts or time.time())
+
+    await update_sha256_indexes(
+        r,
+        sha256=sha256,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=last_seen_epoch,
+        disposition=(data.get("disposition") or "").upper(),
+    )
 
 
 async def _get_vt_runtime_config() -> dict:
@@ -95,7 +130,6 @@ async def _get_vt_runtime_config() -> dict:
     rate_per_min = _intish(cfg.get("vt_budget_per_min"), default=DEFAULT_RATE_LIMIT_PER_MIN)
     retry_429 = _intish(cfg.get("vt_retry_seconds_429"), default=DEFAULT_RETRY_SECONDS_429)
 
-    # Guardrails
     if rate_per_min < 1:
         rate_per_min = 1
     if retry_429 < 10:
@@ -124,7 +158,6 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(url, headers=headers)
     except Exception:
-        # transient failure: stage again for later retry
         await r.hset(
             key,
             mapping={
@@ -136,6 +169,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
                 "vt_next_retry_at": str(now + 300),
             },
         )
+        await _sync_sha256_indexes(sha256, fallback_ts=now)
         await _release_queue_lease(key)
         await _stage_again(sha256)
         return
@@ -163,6 +197,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
                 "vt_next_retry_at": "",
             },
         )
+        await _sync_sha256_indexes(sha256, fallback_ts=now)
 
         if status == "RED" and prev_status != "RED" and not already_alerted:
             computer = prev.get("computer") or ""
@@ -189,6 +224,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
 
             await alert_router.send(alert)
             await r.hset(key, mapping={"alerted_red": "1", "alerted_red_at": str(time.time())})
+            await _sync_sha256_indexes(sha256, fallback_ts=now)
 
         await _release_queue_lease(key)
         return
@@ -205,6 +241,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
                 "vt_next_retry_at": "",
             },
         )
+        await _sync_sha256_indexes(sha256, fallback_ts=now)
         await _release_queue_lease(key)
         return
 
@@ -226,12 +263,12 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
                 "vt_next_retry_at": str(next_retry_at),
             },
         )
+        await _sync_sha256_indexes(sha256, fallback_ts=now)
 
         await _release_queue_lease(key)
         await _stage_again(sha256)
         return
 
-    # Other errors: operational errors; stage for later retry
     await r.hset(
         key,
         mapping={
@@ -243,6 +280,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
             "vt_next_retry_at": str(now + 600),
         },
     )
+    await _sync_sha256_indexes(sha256, fallback_ts=now)
     await _release_queue_lease(key)
     await _stage_again(sha256)
 
@@ -265,17 +303,15 @@ async def worker_loop() -> None:
         rate_per_min = cfg["rate_per_min"]
         retry_429 = cfg["retry_429"]
 
-        # pacing interval (read from KV)
         sleep_seconds = 60.0 / max(1, rate_per_min)
 
         if not vt_enabled:
-            # VT disabled: do not call VT; do not lose candidate
             await _stage_again(sha256)
             await _release_queue_lease(key)
+            await _sync_sha256_indexes(sha256)
             continue
 
         if not api_key:
-            # VT enabled but key missing: mark item as ERROR-ish + backoff, re-stage
             now = time.time()
             await r.hset(
                 key,
@@ -288,11 +324,11 @@ async def worker_loop() -> None:
                     "vt_next_retry_at": str(now + 300),
                 },
             )
+            await _sync_sha256_indexes(sha256, fallback_ts=now)
             await _release_queue_lease(key)
             await _stage_again(sha256)
             continue
 
-        # Respect retry time if present (defensive; selector should already enforce)
         data = await r.hgetall(key)
         nra = data.get("vt_next_retry_at")
         if nra:
@@ -300,6 +336,7 @@ async def worker_loop() -> None:
                 if float(nra) > time.time():
                     await _stage_again(sha256)
                     await _release_queue_lease(key)
+                    await _sync_sha256_indexes(sha256)
                     continue
             except ValueError:
                 pass

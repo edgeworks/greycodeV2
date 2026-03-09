@@ -14,7 +14,7 @@
 
     <label>Search
       <input type="text" name="q" value="{{ q }}"
-              placeholder="{% if tab==1 %}sha256 / computer / path{% elif tab==3 %}ip / computer{% else %}domain / computer{% endif %}">
+             placeholder="{% if tab==1 %}sha256 / computer / path{% elif tab==3 %}ip / computer{% else %}domain / computer{% endif %}">
     </label>
 
     <label>Status
@@ -48,6 +48,36 @@
       </label>
     {% endif %}
 
+    <label>Sort
+      <select name="sort">
+        <option value="last_seen" {% if sort == "last_seen" %}selected{% endif %}>Last seen</option>
+        <option value="count_total" {% if sort == "count_total" %}selected{% endif %}>Count</option>
+        <option value="rare" {% if sort == "rare" %}selected{% endif %}>Rare</option>
+
+        {# keep legacy sort options available for now #}
+        {% if tab == 1 %}
+          <option value="status" {% if sort == "status" %}selected{% endif %}>Status</option>
+          <option value="computer" {% if sort == "computer" %}selected{% endif %}>Computer</option>
+          <option value="image" {% if sort == "image" %}selected{% endif %}>Image</option>
+          <option value="indicator" {% if sort == "indicator" %}selected{% endif %}>SHA256</option>
+        {% else %}
+          <option value="listing_state" {% if sort == "listing_state" %}selected{% endif %}>Listing</option>
+          <option value="computer_last" {% if sort == "computer_last" %}selected{% endif %}>Computer</option>
+          <option value="indicator" {% if sort == "indicator" %}selected{% endif %}>
+            {% if tab == 3 %}DestinationIp{% else %}QueryName{% endif %}
+          </option>
+          <option value="source" {% if sort == "source" %}selected{% endif %}>Source</option>
+        {% endif %}
+      </select>
+    </label>
+
+    <label>Order
+      <select name="order">
+        <option value="desc" {% if order == "desc" %}selected{% endif %}>Desc</option>
+        <option value="asc" {% if order == "asc" %}selected{% endif %}>Asc</option>
+      </select>
+    </label>
+
     <label>Page size
       <select name="page_size">
         {% for ps in [50,100,200,500,1000] %}
@@ -56,9 +86,6 @@
       </select>
     </label>
 
-    <!-- “state” kept in hidden fields -->
-    <input type="hidden" name="sort" value="{{ sort }}">
-    <input type="hidden" name="order" value="{{ order }}">
     <input type="hidden" name="page" value="1">
 
     <div class="actions" style="margin-top: 18px;">
@@ -66,24 +93,27 @@
 
       {% if tab == 1 %}
         <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/1?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
+      {% elif tab == 3 %}
+        <a class="btn" href="/ui/sysmon/3?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/3?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
       {% else %}
-        <a class="btn" href="/ui/sysmon/{{tab}}?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/22?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/22?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
       {% endif %}
     </div>
   </form>
 
   <div id="tablewrap"
-        hx-get="/ui/sysmon/{{ tab }}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page={{page}}&page_size={{page_size}}"
-        hx-trigger="load">
+       hx-get="/ui/sysmon/{{ tab }}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page={{page}}&page_size={{page_size}}"
+       hx-trigger="load">
     <p class="muted">Loading…</p>
   </div>
 
 </section>
 
-<!-- Backdrop catches outside clicks -->
 <div class="drawer-backdrop" id="drawerBackdrop"></div>
 
-<!-- Off-canvas panel (HTMX will swap content into #drawer) -->
 <aside class="drawer-panel" id="drawerPanel" aria-label="Details drawer">
   <div class="drawer-shell" id="drawer">
     <div class="card">

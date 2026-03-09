@@ -10,6 +10,7 @@ import httpx
 import redis.asyncio as redis
 
 from greycode_core.alerts.router import AlertRouter
+from greycode_core.indexes import update_listing_indexes, remove_from_all_indexes
 
 from greycode_core.blacklist_engine import (
     Vendor,
@@ -18,7 +19,6 @@ from greycode_core.blacklist_engine import (
     parse_ip_lines,
     parse_domain_lines,
     parse_spamhaus_drop_cidrs,
-    vendor_set_key,
     SET_IP_PREFIX,
     SET_DOMAIN_PREFIX,
     CIDR_IP_PREFIX,
@@ -27,6 +27,8 @@ from greycode_core.blacklist_engine import (
 )
 
 CFG_KEY = "greycode:cfg"
+KNOWN_IPS_SET = "greycode:known:ips"
+KNOWN_DOMAINS_SET = "greycode:known:domains"
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -44,6 +46,59 @@ alert_router = AlertRouter()
 
 def _clamp(n: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
+
+
+def _iso_to_epoch(ts: str | None) -> float:
+    if not ts:
+        return time.time()
+    try:
+        return __import__("datetime").datetime.fromisoformat(ts).timestamp()
+    except Exception:
+        return time.time()
+
+
+async def _sync_ip_indexes(ip_value: str) -> None:
+    key = f"greycode:ip:{ip_value}"
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_from_all_indexes(r, kind="ip", indicator=ip_value)
+        await r.srem(KNOWN_IPS_SET, ip_value)
+        return
+
+    await r.sadd(KNOWN_IPS_SET, ip_value)
+
+    await update_listing_indexes(
+        r,
+        kind="ip",
+        indicator=ip_value,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=_iso_to_epoch(data.get("last_seen")),
+        listing_state=(data.get("listing_state") or "").upper(),
+    )
+
+
+async def _sync_domain_indexes(domain_value: str) -> None:
+    key = f"greycode:domain:{domain_value}"
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_from_all_indexes(r, kind="domain", indicator=domain_value)
+        await r.srem(KNOWN_DOMAINS_SET, domain_value)
+        return
+
+    await r.sadd(KNOWN_DOMAINS_SET, domain_value)
+
+    await update_listing_indexes(
+        r,
+        kind="domain",
+        indicator=domain_value,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=_iso_to_epoch(data.get("last_seen")),
+        listing_state=(data.get("listing_state") or "").upper(),
+    )
 
 
 async def _get_interval_min() -> int:
@@ -100,7 +155,6 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
 
     text = resp.text or ""
 
-    # Parse and store
     if v.type == "ip":
         items = parse_ip_lines(text)
         set_key = f"{SET_IP_PREFIX}{v.key}"
@@ -121,14 +175,12 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
 
     elif v.type == "ip_cidr":
         cidrs = parse_spamhaus_drop_cidrs(text)
-        # store CIDR list as JSON string
         await r.set(f"{CIDR_IP_PREFIX}{v.key}", __import__("json").dumps(cidrs))
 
     else:
         # url or unknown: ignore for now
         return (False, v)
 
-    # Update metadata
     v.last_fetch_at = now
     v.etag = resp.headers.get("ETag") or v.etag
     v.last_modified = resp.headers.get("Last-Modified") or v.last_modified
@@ -136,11 +188,10 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
     return (True, v)
 
 
-async def recheck_all_indicators(vendors, batch):
-
+async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
     cursor = 0
     while True:
-        cursor, ips = await r.sscan("greycode:known:ips", cursor=cursor, count=batch)
+        cursor, ips = await r.sscan(KNOWN_IPS_SET, cursor=cursor, count=batch)
 
         for ip in ips:
             hits = await check_indicator_hits(
@@ -158,14 +209,14 @@ async def recheck_all_indicators(vendors, batch):
                 hits=hits,
                 reason="periodic_recheck",
             )
+            await _sync_ip_indexes(ip)
 
         if cursor == 0:
             break
 
-
     cursor = 0
     while True:
-        cursor, domains = await r.sscan("greycode:known:domains", cursor=cursor, count=batch)
+        cursor, domains = await r.sscan(KNOWN_DOMAINS_SET, cursor=cursor, count=batch)
 
         for dom in domains:
             hits = await check_indicator_hits(
@@ -183,6 +234,7 @@ async def recheck_all_indicators(vendors, batch):
                 hits=hits,
                 reason="periodic_recheck",
             )
+            await _sync_domain_indexes(dom)
 
         if cursor == 0:
             break
@@ -194,7 +246,6 @@ async def update_cycle(run_reason: str) -> None:
 
     vendors = await load_vendors(r)
 
-    # 1) fetch enabled vendors (respect min_fetch_min)
     changed_any = False
     new_vendors: List[Vendor] = []
     for v in vendors:
@@ -202,16 +253,14 @@ async def update_cycle(run_reason: str) -> None:
         changed_any = changed_any or changed
         new_vendors.append(v2)
 
-    # persist vendor metadata (etag/last_modified/last_fetch_at)
     await save_vendors(r, new_vendors)
     vendors = new_vendors
 
-    # 2) Recheck all records each cycle (your requested behavior)
     await recheck_all_indicators(vendors, batch=batch)
 
 
 async def worker_loop() -> None:
-    # Run once at startup (your requirement)
+    # Run once at startup
     await update_cycle(run_reason="startup")
 
     while True:
