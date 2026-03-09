@@ -174,6 +174,7 @@ DEFAULT_VENDORS = [
 DEFAULT_SETTINGS: dict[str, Any] = {
     "blacklist_update_interval_min": "60",
     "blacklist_recheck_batch": "2000",
+    "threatfox_api_key_enc": "",
 
     "vt_enabled": "0",
     "vt_budget_daily": "500",
@@ -233,7 +234,7 @@ async def load_settings() -> dict[str, Any]:
     Merge defaults + redis hash + vendor JSON.
     All stored values are strings; UI can cast where needed.
     """
-    stored = await r.hgetall(CFG_KEY)  # str->str
+    stored = await r.hgetall(CFG_KEY)
     s = {**DEFAULT_SETTINGS, **(stored or {})}
 
     vendors_json = await r.get(VENDORS_KEY)
@@ -249,12 +250,14 @@ async def load_settings() -> dict[str, Any]:
     else:
         s["vendors"] = DEFAULT_VENDORS
 
-    # Derived display helpers
     vt_key_plain = decrypt_secret(s.get("vt_api_key_enc") or "")
     s["vt_key_masked"] = mask_secret(vt_key_plain)
+
+    tf_key_plain = decrypt_secret(s.get("threatfox_api_key_enc") or "")
+    s["threatfox_api_key_masked"] = mask_secret(tf_key_plain)
+
     s["notify_smtp_pass_masked"] = "stored" if (s.get("notify_smtp_pass_enc") or "") else ""
 
-    # Convenience bool/int for templates
     s["vt_enabled_bool"] = (s.get("vt_enabled", "0") == "1")
     s["notify_email_enabled_bool"] = (s.get("notify_email_enabled", "0") == "1")
 
@@ -940,28 +943,39 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
     s = await load_settings()
     vendors = s.get("vendors") or DEFAULT_VENDORS
     new_vendors = []
+
     for v in vendors:
         key = v.get("key")
         if not key:
             continue
+
         enabled = form.get(f"vendor_enabled_{key}") is not None
         url = (form.get(f"vendor_url_{key}") or v.get("url") or "").strip()
+
         new_vendors.append({
             "key": key,
             "name": v.get("name") or key,
             "enabled": bool(enabled),
             "type": v.get("type") or "",
             "url": url,
+            "requires_api_key": bool(v.get("requires_api_key")),
+            "api_key_setting": v.get("api_key_setting") or "",
             "min_fetch_min": int(v.get("min_fetch_min") or 60),
             "etag": v.get("etag") or "",
             "last_modified": v.get("last_modified") or "",
             "last_fetch_at": float(v.get("last_fetch_at") or 0.0),
         })
 
-    await save_settings({
+    mapping = {
         "blacklist_update_interval_min": update_interval,
         "blacklist_recheck_batch": recheck_batch,
-    })
+    }
+
+    threatfox_api_key = (form.get("threatfox_api_key") or "").strip()
+    if threatfox_api_key:
+        mapping["threatfox_api_key_enc"] = encrypt_secret(threatfox_api_key)
+
+    await save_settings(mapping)
     await save_vendors(new_vendors)
 
     s = await load_settings()

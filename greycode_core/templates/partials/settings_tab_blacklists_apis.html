@@ -1,6 +1,6 @@
 <section class="settings-section">
   <h2>Blacklists</h2>
-  <p class="muted">Vendor feeds, refresh interval, and recheck behavior</p>
+  <p class="muted">Vendor feeds, update interval, and recheck behavior</p>
 
   <form
     class="settings-form"
@@ -32,11 +32,11 @@
     </div>
 
     <div class="settings-block">
-      <div class="settings-subtitle">Vendors</div>
+      <div class="settings-subtitle">Vendor feeds</div>
 
       <div class="vendor-list">
         {% for v in settings.vendors %}
-          <div class="vendor-row">
+          <div class="vendor-row vendor-row-wide">
             <label class="switch">
               <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
               <span class="slider"></span>
@@ -49,6 +49,14 @@
               name="vendor_url_{{ v.key }}"
               value="{{ v.url }}"
               placeholder="https://...">
+
+            {% if v.requires_api_key %}
+              <input
+                class="vendor-apikey"
+                type="password"
+                name="threatfox_api_key"
+                placeholder="{% if settings.threatfox_api_key_masked %}Stored: {{ settings.threatfox_api_key_masked }}{% else %}API key{% endif %}">
+            {% endif %}
           </div>
         {% endfor %}
       </div>

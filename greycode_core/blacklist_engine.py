@@ -22,7 +22,7 @@ VENDORS_KEY = "greycode:blacklist:vendors"
 
 SET_IP_PREFIX = "greycode:blacklist:set:ip:"
 SET_DOMAIN_PREFIX = "greycode:blacklist:set:domain:"
-CIDR_IP_PREFIX = "greycode:blacklist:cidr:ip:"  # optional, for CIDR-style feeds
+CIDR_IP_PREFIX = "greycode:blacklist:cidr:ip:"
 
 HIST_PREFIX_IP = "greycode:history:ip:"
 HIST_PREFIX_DOMAIN = "greycode:history:domain:"
@@ -30,31 +30,34 @@ HIST_PREFIX_DOMAIN = "greycode:history:domain:"
 
 DEFAULT_VENDORS = [
     {
-        "key": "threatfox_ip",
-        "name": "ThreatFox IPs",
+        "key": "threatfox_domains_recent",
+        "name": "ThreatFox Domains (recent)",
         "enabled": True,
-        "type": "ip",
-        "url": "https://threatfox.abuse.ch/downloads/ipblocklist/",
-        "min_fetch_min": 5,
-    },
-    {
-        # URLhaus text list includes URLs; we keep it disabled for now unless you want it on.
-        # When enabled, you probably want to extract domains instead of full URLs initially.
-        "key": "urlhaus_text",
-        "name": "URLhaus (text)",
-        "enabled": False,
-        "type": "domain",
-        "url": "https://urlhaus.abuse.ch/downloads/text/",
+        "type": "domain_json",
+        "url": "https://threatfox-api.abuse.ch/files/exports/domains_recent.json",
+        "requires_api_key": True,
+        "api_key_setting": "threatfox_api_key_enc",
         "min_fetch_min": 60,
     },
     {
-        # Spamhaus DROP is CIDR-based; keep disabled until you want CIDR membership support.
+        "key": "threatfox_ipport_recent",
+        "name": "ThreatFox IP:Port (recent)",
+        "enabled": True,
+        "type": "ip_port_json",
+        "url": "https://threatfox-api.abuse.ch/files/exports/ip-port_recent.json",
+        "requires_api_key": True,
+        "api_key_setting": "threatfox_api_key_enc",
+        "min_fetch_min": 60,
+    },
+    {
         "key": "spamhaus_drop",
-        "name": "Spamhaus DROP (CIDR)",
-        "enabled": False,
+        "name": "Spamhaus DROP",
+        "enabled": True,
         "type": "ip_cidr",
         "url": "https://www.spamhaus.org/drop/drop.txt",
-        "min_fetch_min": 1440,  # daily
+        "requires_api_key": False,
+        "api_key_setting": "",
+        "min_fetch_min": 1440,
     },
 ]
 
@@ -85,13 +88,39 @@ def normalize_ip(ip: str) -> str:
     return str(ipaddress.ip_address((ip or "").strip()))
 
 
+def split_ip_port(value: str) -> tuple[str, str]:
+    """
+    Best-effort split for IPv4 '1.2.3.4:443' and bracketed IPv6 '[2001:db8::1]:443'.
+    Returns (ip, port). Port may be "" if not present/parseable.
+    """
+    s = (value or "").strip()
+    if not s:
+        return ("", "")
+
+    if s.startswith("[") and "]" in s:
+        end = s.find("]")
+        host = s[1:end]
+        rest = s[end + 1:]
+        port = rest[1:] if rest.startswith(":") else ""
+        return (host.strip(), port.strip())
+
+    if s.count(":") == 1:
+        host, port = s.rsplit(":", 1)
+        return (host.strip(), port.strip())
+
+    # likely plain IP (or unbracketed IPv6 with no port handling)
+    return (s, "")
+
+
 @dataclass
 class Vendor:
     key: str
     name: str
     enabled: bool
-    type: str  # "ip" | "domain" | "url" | "ip_cidr"
+    type: str               # ip | domain | url | ip_cidr | domain_json | ip_port_json
     url: str
+    requires_api_key: bool = False
+    api_key_setting: str = ""
     min_fetch_min: int = 60
     etag: str = ""
     last_modified: str = ""
@@ -117,6 +146,8 @@ async def load_vendors(r) -> List[Vendor]:
                     enabled=bool(v.get("enabled")),
                     type=str(v.get("type") or ""),
                     url=str(v.get("url") or ""),
+                    requires_api_key=bool(v.get("requires_api_key")),
+                    api_key_setting=str(v.get("api_key_setting") or ""),
                     min_fetch_min=int(v.get("min_fetch_min") or 60),
                     etag=str(v.get("etag") or ""),
                     last_modified=str(v.get("last_modified") or ""),
@@ -126,7 +157,6 @@ async def load_vendors(r) -> List[Vendor]:
         except Exception:
             continue
 
-    # discard broken entries
     out = [v for v in out if v.key and v.type and v.url]
     return out
 
@@ -139,6 +169,8 @@ async def save_vendors(r, vendors: List[Vendor]) -> None:
             "enabled": v.enabled,
             "type": v.type,
             "url": v.url,
+            "requires_api_key": v.requires_api_key,
+            "api_key_setting": v.api_key_setting,
             "min_fetch_min": v.min_fetch_min,
             "etag": v.etag,
             "last_modified": v.last_modified,
@@ -150,14 +182,13 @@ async def save_vendors(r, vendors: List[Vendor]) -> None:
 
 
 def vendor_set_key(v: Vendor) -> str:
-    if v.type == "ip":
+    if v.type in ("ip", "ip_port_json"):
         return f"{SET_IP_PREFIX}{v.key}"
-    if v.type == "domain":
+    if v.type in ("domain", "domain_json"):
         return f"{SET_DOMAIN_PREFIX}{v.key}"
     if v.type == "url":
         return f"greycode:blacklist:set:url:{v.key}"
     if v.type == "ip_cidr":
-        # CIDR list stored separately
         return f"{CIDR_IP_PREFIX}{v.key}"
     raise ValueError(f"Unknown vendor type: {v.type}")
 
@@ -172,7 +203,6 @@ def parse_ip_lines(text: str) -> List[str]:
         line = line.strip()
         if not line or line.startswith("#") or line.startswith("//"):
             continue
-        # allow "ip ; comment"
         token = line.split()[0].split(";")[0].strip()
         try:
             out.append(normalize_ip(token))
@@ -202,12 +232,85 @@ def parse_spamhaus_drop_cidrs(text: str) -> List[str]:
             continue
         token = line.split(";")[0].strip()
         try:
-            # keep as CIDR string
             _ = ipaddress.ip_network(token, strict=False)
             cidrs.append(token)
         except Exception:
             continue
     return cidrs
+
+
+def parse_threatfox_domains_json(text: str) -> List[str]:
+    """
+    ThreatFox domains_recent.json export.
+    Tries multiple field names defensively.
+    """
+    payload = _json_loads(text or "[]", [])
+    if isinstance(payload, dict):
+        rows = payload.get("data") or payload.get("results") or payload.get("ioc_list") or []
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+
+    out: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        candidates = [
+            row.get("domain"),
+            row.get("ioc"),
+            row.get("ioc_value"),
+            row.get("host"),
+        ]
+
+        for candidate in candidates:
+            d = normalize_domain(str(candidate or ""))
+            if d:
+                out.append(d)
+                break
+
+    return sorted(set(out))
+
+
+def parse_threatfox_ip_port_json(text: str) -> List[str]:
+    """
+    ThreatFox ip-port_recent.json export.
+    Extract only the IP part because Greycode Sysmon 3 keys on DestinationIp.
+    """
+    payload = _json_loads(text or "[]", [])
+    if isinstance(payload, dict):
+        rows = payload.get("data") or payload.get("results") or payload.get("ioc_list") or []
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+
+    out: List[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+
+        candidates = [
+            row.get("ip"),
+            row.get("ip_address"),
+            row.get("ioc"),
+            row.get("ioc_value"),
+            row.get("ip_port"),
+        ]
+
+        for candidate in candidates:
+            raw = str(candidate or "").strip()
+            if not raw:
+                continue
+            host, _port = split_ip_port(raw)
+            try:
+                out.append(normalize_ip(host))
+                break
+            except Exception:
+                continue
+
+    return sorted(set(out))
 
 
 # ---------------------------------
@@ -216,17 +319,16 @@ def parse_spamhaus_drop_cidrs(text: str) -> List[str]:
 
 class CidrCache:
     """
-    CIDR membership is expensive; we cache parsed networks in-memory per vendor for TTL.
-    Use only for ip_cidr vendors (which are disabled by default).
+    CIDR membership is more expensive; cache parsed networks in-memory per vendor for TTL.
     """
     def __init__(self, ttl_sec: int = 60):
         self.ttl_sec = ttl_sec
-        self._last = 0.0
+        self._last: Dict[str, float] = {}
         self._nets: Dict[str, List[ipaddress._BaseNetwork]] = {}
 
     async def get_networks(self, r, vendor_key: str) -> List[ipaddress._BaseNetwork]:
         now = _now()
-        if (now - self._last) < self.ttl_sec and vendor_key in self._nets:
+        if vendor_key in self._nets and (now - self._last.get(vendor_key, 0.0)) < self.ttl_sec:
             return self._nets[vendor_key]
 
         raw = await r.get(f"{CIDR_IP_PREFIX}{vendor_key}")
@@ -240,7 +342,7 @@ class CidrCache:
                     continue
 
         self._nets[vendor_key] = nets
-        self._last = now
+        self._last[vendor_key] = now
         return nets
 
 
@@ -255,19 +357,23 @@ async def check_indicator_hits(r, *, indicator_type: str, indicator: str, vendor
 
     if indicator_type == "ip":
         ip_norm = normalize_ip(indicator)
+        ip_obj = ipaddress.ip_address(ip_norm)
+
         for v in vendors:
             if not v.enabled:
                 continue
-            if v.type == "ip":
+
+            if v.type in ("ip", "ip_port_json"):
                 if await r.sismember(f"{SET_IP_PREFIX}{v.key}", ip_norm):
                     hits.append(v.key)
+
             elif v.type == "ip_cidr":
                 nets = await cidr_cache.get_networks(r, v.key)
-                ip_obj = ipaddress.ip_address(ip_norm)
                 for net in nets:
                     if ip_obj in net:
                         hits.append(v.key)
                         break
+
         return hits
 
     if indicator_type == "domain":
@@ -275,9 +381,11 @@ async def check_indicator_hits(r, *, indicator_type: str, indicator: str, vendor
         for v in vendors:
             if not v.enabled:
                 continue
-            if v.type == "domain":
+
+            if v.type in ("domain", "domain_json"):
                 if await r.sismember(f"{SET_DOMAIN_PREFIX}{v.key}", dom):
                     hits.append(v.key)
+
         return hits
 
     raise ValueError(f"Unsupported indicator_type: {indicator_type}")
@@ -329,10 +437,8 @@ async def update_indicator_record(
         prev_listed_by = []
 
     new_state = "LISTED" if hits else "NO_LISTING"
-
     vendors_added, vendors_removed = _diff_lists(hits, prev_listed_by)
 
-    # Always update these fields (freshness)
     mapping: Dict[str, str] = {
         "type": indicator_type,
         "source": "blacklist",
@@ -370,9 +476,7 @@ async def update_indicator_record(
             limit=50,
         )
 
-        # Alert on both directions
         if new_state == "LISTED":
-            # dedupe (simple)
             already = (data.get("alerted_listed_at") or "").strip()
             if not already:
                 alert = AlertEvent(
@@ -388,7 +492,7 @@ async def update_indicator_record(
                 await alert_router.send(alert)
                 mapping["alerted_listed_at"] = str(now)
 
-        else:  # DELISTED
+        else:
             already = (data.get("alerted_delisted_at") or "").strip()
             if not already:
                 alert = AlertEvent(
@@ -404,8 +508,6 @@ async def update_indicator_record(
                 await alert_router.send(alert)
                 mapping["alerted_delisted_at"] = str(now)
 
-    # First-time initialization: if prev_state was PENDING, we still want to record history,
-    # but we don't alert on first evaluation unless you explicitly want that.
     if prev_state == "PENDING":
         mapping.update(
             {

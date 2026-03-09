@@ -5,7 +5,9 @@ import asyncio
 import os
 import time
 from typing import List, Tuple
-
+import base64
+import hashlib
+from cryptography.fernet import Fernet, InvalidToken
 import httpx
 import redis.asyncio as redis
 
@@ -19,6 +21,8 @@ from greycode_core.blacklist_engine import (
     parse_ip_lines,
     parse_domain_lines,
     parse_spamhaus_drop_cidrs,
+    parse_threatfox_domains_json,
+    parse_threatfox_ip_port_json,
     SET_IP_PREFIX,
     SET_DOMAIN_PREFIX,
     CIDR_IP_PREFIX,
@@ -43,6 +47,22 @@ DEFAULT_RECHECK_BATCH = 2000
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 alert_router = AlertRouter()
 
+def _fernet() -> Fernet:
+    secret = os.getenv("GREYCODE_SESSION_SECRET", "")
+    if not secret:
+        raise RuntimeError("GREYCODE_SESSION_SECRET not set (needed to decrypt vendor API keys).")
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
+
+
+def decrypt_secret(ciphertext: str) -> str:
+    if not ciphertext:
+        return ""
+    try:
+        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        return ""
 
 def _clamp(n: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
@@ -139,11 +159,19 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
     if v.last_modified:
         headers["If-Modified-Since"] = v.last_modified
 
+    effective_url = v.url
+    if v.requires_api_key:
+        enc = await r.hget(CFG_KEY, v.api_key_setting or "")
+        api_key = decrypt_secret(enc or "")
+        if not api_key:
+            return (False, v)
+        sep = "&" if "?" in effective_url else "?"
+        effective_url = f"{effective_url}{sep}auth-key={api_key}"
+
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(v.url, headers=headers)
+            resp = await client.get(effective_url, headers=headers)
     except Exception:
-        # don't update timestamps on failure
         return (False, v)
 
     if resp.status_code == 304:
@@ -173,12 +201,29 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
             pipe.sadd(set_key, *items)
         await pipe.execute()
 
+    elif v.type == "domain_json":
+        items = parse_threatfox_domains_json(text)
+        set_key = f"{SET_DOMAIN_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+
+    elif v.type == "ip_port_json":
+        items = parse_threatfox_ip_port_json(text)
+        set_key = f"{SET_IP_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+
     elif v.type == "ip_cidr":
         cidrs = parse_spamhaus_drop_cidrs(text)
         await r.set(f"{CIDR_IP_PREFIX}{v.key}", __import__("json").dumps(cidrs))
 
     else:
-        # url or unknown: ignore for now
         return (False, v)
 
     v.last_fetch_at = now
