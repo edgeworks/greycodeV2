@@ -1056,3 +1056,13 @@ body.settings-modal-open .settings-modal-panel {
     grid-template-columns: 1fr;
   }
 }
+
+body.profile-modal-open #profileModalBackdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.profile-modal-open #profileModalPanel {
+  opacity: 1;
+  pointer-events: auto;
+}

@@ -1,0 +1,95 @@
+<div class="settings-modal-shell">
+
+  {% if saved %}
+  <div id="profileNotice" class="notice-banner success">
+    <div>Saved: {{ saved }}</div>
+    <div class="close" onclick="this.parentElement.remove()">✕</div>
+  </div>
+  {% endif %}
+
+  {% if err %}
+  <div class="notice-banner error">
+    <div>{{ err }}</div>
+    <div class="close" onclick="this.parentElement.remove()">✕</div>
+  </div>
+  {% endif %}
+
+  <div class="settings-modal-topbar">
+    <div>
+      <h1>User Profile</h1>
+      <div class="settings-subtitle">
+        Account details and password change
+      </div>
+    </div>
+
+    <button class="settings-modal-close" type="button" onclick="gcCloseProfileModal()">✕</button>
+  </div>
+
+  <div class="settings-tabs">
+    <div class="settings-tab active">Profile</div>
+    <div class="settings-tab">Password</div>
+  </div>
+
+  <section class="settings-section">
+    <h2>Profile</h2>
+
+    <form
+      class="settings-form"
+      hx-post="/ui/profile/update"
+      hx-target="#profileModalContent"
+      hx-swap="innerHTML">
+
+      <div class="settings-grid">
+        <label>Username
+          <input value="{{ user_profile.username or '' }}" readonly>
+        </label>
+
+        <label>Role
+          <input value="{{ user_profile.role or '' }}" readonly>
+        </label>
+
+        <label>Email
+          <input name="email" value="{{ user_profile.email or '' }}" placeholder="admin@example.org">
+        </label>
+
+        <label>Last login
+          <input value="{{ user_profile.last_login_at or '' }}" readonly>
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="submit">Save Profile</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="settings-section">
+    <h2>Password</h2>
+
+    <form
+      class="settings-form"
+      hx-post="/ui/profile/password"
+      hx-target="#profileModalContent"
+      hx-swap="innerHTML">
+
+      <div class="settings-grid">
+        <label>Current password
+          <input type="password" name="current_password" required>
+        </label>
+
+        <label>New password
+          <input type="password" name="new_password" required>
+        </label>
+
+        <label>Confirm new password
+          <input type="password" name="new_password_confirm" required>
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="submit">Change Password</button>
+      </div>
+    </form>
+  </section>
+
+</div>

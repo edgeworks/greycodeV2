@@ -28,7 +28,13 @@ from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
 from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record
 from alerts import AlertRouter
-
+from user_store import (
+    get_user,
+    update_user_email,
+    update_user_password_hash,
+    set_last_login,
+    ensure_bootstrap_admin,
+)
 
 
 app = FastAPI(title="Greycode API")
@@ -58,11 +64,23 @@ app.add_middleware(
 UI_USER = os.getenv("GREYCODE_UI_USER", "greycode")
 UI_PASS = os.getenv("GREYCODE_UI_PASS", "")
 
+@app.on_event("startup")
+async def startup_bootstrap() -> None:
+    await ensure_bootstrap_admin(
+        r,
+        bootstrap_username=UI_USER,
+        bootstrap_password_hash=UI_PASS,
+        bootstrap_email="",
+    )
+
 def require_login(request: Request):
     if request.session.get("logged_in") is True:
         return True
     nxt = quote(str(request.url.path), safe="/?=&")
     raise HTTPException(status_code=303, headers={"Location": f"/login?next={nxt}"})
+
+def current_username(request: Request) -> str:
+    return (request.session.get("user") or "").strip().lower()
 
 def pbkdf2_hash(password: str, *, iterations: int = 310_000, salt_bytes: int = 16) -> str:
     """
@@ -429,19 +447,25 @@ async def login_submit(
     password: str = Form(...),
     next: str = Form("/ui"),
 ):
-    if not os.getenv("GREYCODE_SESSION_SECRET"):
-        return JSONResponse({"detail": "GREYCODE_SESSION_SECRET not set"}, status_code=503)
-    if not UI_PASS:
-        return JSONResponse({"detail": "GREYCODE_UI_PASS not set"}, status_code=503)
+    uname = (username or "").strip().lower()
 
-    user_ok = secrets.compare_digest((username or "").strip(), UI_USER)
-    pass_ok = pbkdf2_verify(password or "", UI_PASS)
+    user = await get_user(r, uname)
+    if not user:
+        return RedirectResponse(url="/login?err=1", status_code=303)
 
-    if not (user_ok and pass_ok):
+    if user.get("is_active", "1") != "1":
+        return RedirectResponse(url="/login?err=1", status_code=303)
+
+    stored_hash = user.get("password_hash") or ""
+    if not pbkdf2_verify(password or "", stored_hash):
         return RedirectResponse(url="/login?err=1", status_code=303)
 
     request.session["logged_in"] = True
-    request.session["user"] = UI_USER
+    request.session["user"] = uname
+    request.session["role"] = user.get("role", "user")
+
+    await set_last_login(r, uname)
+
     return RedirectResponse(url=next or "/ui", status_code=303)
 
 
@@ -646,6 +670,79 @@ async def ui_settings_modal(
             "settings_tab": tab,
             "settings_partial": settings_partial_for(tab),
             **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.get("/ui/profile/modal", response_class=HTMLResponse)
+async def ui_profile_modal(request: Request, saved: str = "", err: str = "", _auth=Depends(require_login)):
+    uname = current_username(request)
+    user = await get_user(r, uname)
+
+    return templates.TemplateResponse(
+        "partials/profile_modal.html",
+        {
+            "request": request,
+            "user_profile": user,
+            "saved": saved,
+            "err": err,
+        },
+    )
+
+
+@app.post("/ui/profile/update", response_class=HTMLResponse)
+async def ui_profile_update(
+    request: Request,
+    email: str = Form(""),
+    _auth=Depends(require_login),
+):
+    uname = current_username(request)
+    await update_user_email(r, uname, email)
+
+    user = await get_user(r, uname)
+    return templates.TemplateResponse(
+        "partials/profile_modal.html",
+        {
+            "request": request,
+            "user_profile": user,
+            "saved": "profile",
+            "err": "",
+        },
+    )
+
+
+@app.post("/ui/profile/password", response_class=HTMLResponse)
+async def ui_profile_password(
+    request: Request,
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+    new_password_confirm: str = Form(""),
+    _auth=Depends(require_login),
+):
+    uname = current_username(request)
+    user = await get_user(r, uname)
+
+    err = ""
+
+    stored_hash = user.get("password_hash") or ""
+    if not pbkdf2_verify(current_password or "", stored_hash):
+        err = "Current password is incorrect."
+    elif len(new_password or "") < 10:
+        err = "New password must be at least 10 characters."
+    elif new_password != new_password_confirm:
+        err = "New password confirmation does not match."
+    else:
+        new_hash = pbkdf2_hash(new_password)
+        await update_user_password_hash(r, uname, new_hash)
+
+    user = await get_user(r, uname)
+    return templates.TemplateResponse(
+        "partials/profile_modal.html",
+        {
+            "request": request,
+            "user_profile": user,
+            "saved": "password" if not err else "",
+            "err": err,
         },
     )
 
