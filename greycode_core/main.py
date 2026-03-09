@@ -894,7 +894,7 @@ def settings_partial_for(tab: str) -> str:
         return "partials/settings_tab_notifications.html"
     if tab == "users":
         return "partials/settings_tab_users.html"
-    return "partials/settings_tab_blacklist.html"
+    return "partials/settings_tab_blacklists_apis.html"
 
 
 
@@ -1018,7 +1018,7 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
         {
             "request": request,
             "settings": s,
-            "saved": "blacklist",
+            "saved": "vt",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             **(await get_ui_metrics()),

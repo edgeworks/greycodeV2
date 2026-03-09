@@ -20,30 +20,30 @@
 
   <div class="settings-tabs">
     <button
-      class="settings-tab {% if settings_tab == 'blacklist' %}active{% endif %}"
-      hx-get="/ui/settings/tab/blacklist"
-      hx-target="#settingsTabContent"
-      hx-swap="innerHTML"
-      type="button">
-      Database
+        class="settings-tab {% if settings_tab == 'blacklist' %}active{% endif %}"
+        hx-get="/ui/settings/modal?tab=blacklist"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML"
+        type="button">
+        Blacklists &amp; APIs
     </button>
 
     <button
-      class="settings-tab {% if settings_tab == 'users' %}active{% endif %}"
-      hx-get="/ui/settings/tab/users"
-      hx-target="#settingsTabContent"
-      hx-swap="innerHTML"
-      type="button">
-      Users
+        class="settings-tab {% if settings_tab == 'users' %}active{% endif %}"
+        hx-get="/ui/settings/modal?tab=users"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML"
+        type="button">
+        Users
     </button>
 
     <button
-      class="settings-tab {% if settings_tab == 'notifications' %}active{% endif %}"
-      hx-get="/ui/settings/tab/notifications"
-      hx-target="#settingsTabContent"
-      hx-swap="innerHTML"
-      type="button">
-      Notifications
+        class="settings-tab {% if settings_tab == 'notifications' %}active{% endif %}"
+        hx-get="/ui/settings/modal?tab=notifications"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML"
+        type="button">
+        Notifications
     </button>
   </div>
 

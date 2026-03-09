@@ -1,0 +1,114 @@
+<section class="settings-section">
+  <h2>Blacklists</h2>
+  <p class="muted">Vendor feeds, refresh interval, and recheck behavior</p>
+
+  <form
+    class="settings-form"
+    hx-post="/ui/settings/blacklist"
+    hx-target="#settingsModalContent"
+    hx-swap="innerHTML">
+
+    <div class="settings-grid">
+      <label>Update interval (minutes)
+        <input
+          type="number"
+          name="blacklist_update_interval_min"
+          min="5"
+          max="1440"
+          value="{{ settings.blacklist_update_interval_min or 60 }}"
+          placeholder="60">
+      </label>
+
+      <label>Recheck batch size
+        <input
+          type="number"
+          name="blacklist_recheck_batch"
+          min="200"
+          max="20000"
+          step="100"
+          value="{{ settings.blacklist_recheck_batch or 2000 }}"
+          placeholder="2000">
+      </label>
+    </div>
+
+    <div class="settings-block">
+      <div class="settings-subtitle">Vendors</div>
+
+      <div class="vendor-list">
+        {% for v in settings.vendors %}
+          <div class="vendor-row">
+            <label class="switch">
+              <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+
+            <div class="vendor-name">{{ v.name }}</div>
+
+            <input
+              class="vendor-url"
+              name="vendor_url_{{ v.key }}"
+              value="{{ v.url }}"
+              placeholder="https://...">
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save Blacklists</button>
+    </div>
+  </form>
+</section>
+
+<div class="settings-separator"></div>
+
+<section class="settings-section">
+  <h2>VirusTotal API</h2>
+  <p class="muted">Key, budgets, and runtime enablement</p>
+
+  <form
+    class="settings-form"
+    hx-post="/ui/settings/vt"
+    hx-target="#settingsModalContent"
+    hx-swap="innerHTML">
+
+    <div class="settings-grid">
+      <label>Enable VT
+        <select name="vt_enabled">
+          <option value="1" {% if settings.vt_enabled_bool %}selected{% endif %}>Enabled</option>
+          <option value="0" {% if not settings.vt_enabled_bool %}selected{% endif %}>Disabled</option>
+        </select>
+      </label>
+
+      <label>API key (stored masked)
+        <input
+          type="password"
+          name="vt_api_key"
+          placeholder="{% if settings.vt_key_masked %}Stored: {{ settings.vt_key_masked }}{% else %}Not set{% endif %}">
+        <div class="hint muted">Leave empty to keep existing key.</div>
+      </label>
+
+      <label>Daily budget
+        <input
+          type="number"
+          min="0"
+          step="1"
+          name="vt_budget_daily"
+          value="{{ settings.vt_budget_daily }}">
+      </label>
+
+      <label>Per-minute budget
+        <input
+          type="number"
+          min="0"
+          step="1"
+          name="vt_budget_per_min"
+          value="{{ settings.vt_budget_per_min }}">
+      </label>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save VirusTotal</button>
+    </div>
+  </form>
+</section>

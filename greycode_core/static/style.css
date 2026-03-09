@@ -951,6 +951,12 @@ body.drawer-open .drawer-panel {
   max-width: 1100px;
 }
 
+.settings-separator {
+  height: 1px;
+  margin: 24px 0;
+  background: rgba(255,255,255,0.08);
+}
+
 body.settings-modal-open #settingsModalBackdrop {
   opacity: 1;
   pointer-events: auto;
