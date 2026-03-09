@@ -35,7 +35,17 @@ from user_store import (
     set_last_login,
     ensure_bootstrap_admin,
 )
-
+from indexes import (
+    idx_z_last_seen,
+    idx_z_count,
+    idx_z_rare,
+    idx_s_status,
+    idx_s_listing,
+    idx_s_triage,
+    update_sha256_indexes,
+    update_listing_indexes,
+    remove_from_all_indexes,
+)
 
 app = FastAPI(title="Greycode API")
 BASE_DIR = Path(__file__).resolve().parent
@@ -50,6 +60,10 @@ VT_QUEUE = "greycode:queue:vt"
 STAGED_SET_IP = "greycode:staged:ip_candidates"
 STAGED_SET_DOMAIN = "greycode:staged:domain_candidates"
 CFG_KEY = "greycode:cfg"
+KNOWN_SHA256_SET = "greycode:known:sha256"
+KNOWN_IPS_SET = "greycode:known:ips"
+KNOWN_DOMAINS_SET = "greycode:known:domains"
+
 
 if not os.getenv("GREYCODE_SESSION_SECRET"):
     raise RuntimeError("GREYCODE_SESSION_SECRET must be set")
@@ -128,20 +142,40 @@ async def vt_enabled_setting() -> bool:
 
 VENDORS_KEY = "greycode:settings:blacklist_vendors"
 
+VENDORS_KEY = "greycode:blacklist:vendors"
+
 DEFAULT_VENDORS = [
-    {"key": "threatfox", "name": "ThreatFox", "enabled": True,
-     "url": "https://threatfox.abuse.ch/downloads/ipblocklist/"},
-    {"key": "spamhaus", "name": "Spamhaus (DROP)", "enabled": False,
-     "url": "https://www.spamhaus.org/drop/drop.txt"},
-    {"key": "urlhaus", "name": "URLhaus", "enabled": False,
-     "url": "https://urlhaus.abuse.ch/downloads/text/"},
+    {
+        "key": "threatfox_ip",
+        "name": "ThreatFox IPs",
+        "enabled": True,
+        "type": "ip",
+        "url": "https://threatfox.abuse.ch/downloads/ipblocklist/",
+        "min_fetch_min": 5,
+    },
+    {
+        "key": "urlhaus_text",
+        "name": "URLhaus (text)",
+        "enabled": False,
+        "type": "domain",
+        "url": "https://urlhaus.abuse.ch/downloads/text/",
+        "min_fetch_min": 60,
+    },
+    {
+        "key": "spamhaus_drop",
+        "name": "Spamhaus DROP (CIDR)",
+        "enabled": False,
+        "type": "ip_cidr",
+        "url": "https://www.spamhaus.org/drop/drop.txt",
+        "min_fetch_min": 1440,
+    },
 ]
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "blacklist_refresh_time": "*/30 * * * *",
-    "blacklist_update_time": "0 */6 * * *",
+    "blacklist_update_interval_min": "60",
+    "blacklist_recheck_batch": "2000",
 
-    "vt_enabled": "0",           # stored as string
+    "vt_enabled": "0",
     "vt_budget_daily": "500",
     "vt_budget_per_min": "3",
     "vt_api_key_enc": "",
@@ -291,6 +325,372 @@ def fmt_epoch(ts: Optional[str]) -> str:
 
 def now_iso() -> str:
     return datetime.datetime.utcnow().isoformat()
+
+def iso_to_epoch(ts: Optional[str]) -> float:
+    if not ts:
+        return time.time()
+    try:
+        # naive UTC ISO strings
+        return datetime.datetime.fromisoformat(ts).timestamp()
+    except Exception:
+        return time.time()
+
+
+def record_key_for_kind(kind: str, indicator: str) -> str:
+    if kind == "sha256":
+        return f"greycode:sha256:{indicator}"
+    if kind == "ip":
+        return f"greycode:ip:{indicator}"
+    if kind == "domain":
+        return f"greycode:domain:{indicator}"
+    raise ValueError(f"Unknown kind: {kind}")
+
+
+def known_set_for_kind(kind: str) -> str:
+    if kind == "sha256":
+        return KNOWN_SHA256_SET
+    if kind == "ip":
+        return KNOWN_IPS_SET
+    if kind == "domain":
+        return KNOWN_DOMAINS_SET
+    raise ValueError(f"Unknown kind: {kind}")
+
+
+async def sync_sha256_indexes(sha256_value: str) -> None:
+    key = f"greycode:sha256:{sha256_value}"
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_from_all_indexes(r, kind="sha256", indicator=sha256_value)
+        await r.srem(KNOWN_SHA256_SET, sha256_value)
+        return
+
+    await r.sadd(KNOWN_SHA256_SET, sha256_value)
+
+    await update_sha256_indexes(
+        r,
+        sha256=sha256_value,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
+        disposition=(data.get("disposition") or "").upper(),
+    )
+
+
+async def sync_ip_indexes(ip_value: str) -> None:
+    key = f"greycode:ip:{ip_value}"
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_from_all_indexes(r, kind="ip", indicator=ip_value)
+        await r.srem(KNOWN_IPS_SET, ip_value)
+        return
+
+    await r.sadd(KNOWN_IPS_SET, ip_value)
+
+    await update_listing_indexes(
+        r,
+        kind="ip",
+        indicator=ip_value,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
+        listing_state=(data.get("listing_state") or "").upper(),
+    )
+
+
+async def sync_domain_indexes(domain_value: str) -> None:
+    key = f"greycode:domain:{domain_value}"
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_from_all_indexes(r, kind="domain", indicator=domain_value)
+        await r.srem(KNOWN_DOMAINS_SET, domain_value)
+        return
+
+    await r.sadd(KNOWN_DOMAINS_SET, domain_value)
+
+    await update_listing_indexes(
+        r,
+        kind="domain",
+        indicator=domain_value,
+        status=(data.get("status") or "GREY").upper(),
+        count_total=int(data.get("count_total") or 0),
+        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
+        listing_state=(data.get("listing_state") or "").upper(),
+    )
+
+
+def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: str, data: dict[str, str]) -> dict[str, Any]:
+    row = {
+        "kind": kind,
+        indicator_field: indicator,
+        "status": (data.get("status") or "GREY").upper(),
+        "listing_state": (data.get("listing_state") or "").upper(),
+        "vt_state": (data.get("vt_state") or "").upper(),
+        "vt_malicious": int(data.get("vt_malicious") or 0),
+        "disposition": (data.get("disposition") or "").upper(),
+        "ticket_id": data.get("ticket_id") or "",
+        "count_total": int(data.get("count_total") or 0),
+        "first_seen": data.get("first_seen") or "",
+        "last_seen": data.get("last_seen") or "",
+        "source": data.get("source") or "",
+        "computer": data.get("computer") or "",
+        "computer_first": data.get("computer_first") or "",
+        "computer_last": data.get("computer_last") or "",
+        "image": data.get("image") or "",
+        "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
+    }
+    return row
+
+
+def row_matches_q(tab: int, row: dict[str, Any], q_lower: str) -> bool:
+    if not q_lower:
+        return True
+
+    if tab == 1:
+        hay = f'{row.get("sha256","")} {row.get("computer","")} {row.get("image","")}'.lower()
+    elif tab == 3:
+        hay = f'{row.get("ip","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
+    else:
+        hay = f'{row.get("domain","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
+
+    return q_lower in hay
+
+
+def filter_set_keys_for(kind: str, status: str, triage: str, listing_state: str) -> list[str]:
+    keys: list[str] = []
+
+    if status != "ALL":
+        keys.append(idx_s_status(kind, status))
+
+    if kind == "sha256":
+        tri = (triage or "ALL").upper()
+        if tri in ("OPEN", "TRIAGED"):
+            keys.append(idx_s_triage(kind, tri))
+    else:
+        ls = (listing_state or "ALL").upper()
+        if ls in ("LISTED", "NO_LISTING", "PENDING", "ERROR"):
+            keys.append(idx_s_listing(kind, ls))
+
+    return keys
+
+
+async def exact_count_for_filters(kind: str, filter_keys: list[str]) -> int:
+    if not filter_keys:
+        return int(await r.scard(known_set_for_kind(kind)))
+
+    if len(filter_keys) == 1:
+        return int(await r.scard(filter_keys[0]))
+
+    try:
+        return int(await r.execute_command("SINTERCARD", len(filter_keys), *filter_keys))
+    except Exception:
+        # fallback if SINTERCARD unavailable
+        vals = await r.sinter(*filter_keys)
+        return len(vals)
+
+
+async def member_matches_filter_sets(indicator: str, filter_keys: list[str]) -> bool:
+    if not filter_keys:
+        return True
+
+    for fk in filter_keys:
+        if not await r.sismember(fk, indicator):
+            return False
+    return True
+
+
+async def fetch_indexed_page(
+    *,
+    tab: int,
+    kind: str,
+    indicator_field: str,
+    status: str,
+    triage: str,
+    listing_state: str,
+    q: str,
+    sort: str,
+    order: str,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    if sort == "count_total":
+        base_z = idx_z_count(kind)
+    elif sort == "rare":
+        base_z = idx_z_rare(kind)
+    else:
+        base_z = idx_z_last_seen(kind)
+
+    reverse = (order.lower() != "asc")
+    q_lower = (q or "").strip().lower()
+    filter_keys = filter_set_keys_for(kind, status, triage, listing_state)
+
+    page_start = (page - 1) * page_size
+    page_end = page_start + page_size
+
+    # exact total for no-search case; search case scans the relevant index
+    total = 0 if q_lower else await exact_count_for_filters(kind, filter_keys)
+
+    rows: list[dict[str, Any]] = []
+    matched = 0
+    offset = 0
+    chunk = max(500, page_size * 5)
+
+    while True:
+        if reverse:
+            members = await r.zrevrange(base_z, offset, offset + chunk - 1)
+        else:
+            members = await r.zrange(base_z, offset, offset + chunk - 1)
+
+        if not members:
+            break
+
+        offset += len(members)
+
+        if q_lower:
+            pipe = r.pipeline()
+            for m in members:
+                pipe.hgetall(record_key_for_kind(kind, m))
+            data_list = await pipe.execute()
+
+            for m, data in zip(members, data_list):
+                if not await member_matches_filter_sets(m, filter_keys):
+                    continue
+
+                row = build_row_from_data(tab, kind, indicator_field, m, data or {})
+                if not row_matches_q(tab, row, q_lower):
+                    continue
+
+                total += 1
+                if total > page_start and len(rows) < page_size:
+                    rows.append(row)
+
+            continue
+
+        # no q: can stop early once page filled because total already exact
+        for m in members:
+            if not await member_matches_filter_sets(m, filter_keys):
+                continue
+
+            matched += 1
+            if matched <= page_start:
+                continue
+
+            data = await r.hgetall(record_key_for_kind(kind, m))
+            rows.append(build_row_from_data(tab, kind, indicator_field, m, data or {}))
+
+            if len(rows) >= page_size:
+                return rows, total
+
+    return rows, total
+
+
+async def legacy_ui_sysmon_table(
+    request: Request,
+    *,
+    tab: int,
+    indicator_label: str,
+    indicator_field: str,
+    kind: str,
+    pattern: str,
+    status: str,
+    q: str,
+    sort: str,
+    order: str,
+    page: int,
+    page_size: int,
+    triage: str,
+    listing_state: str,
+):
+    q_lower = (q or "").strip().lower()
+
+    rows = []
+    cursor = 0
+
+    while True:
+        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
+        for key in keys:
+            data = await r.hgetall(key)
+            indicator = key.split(":", 2)[-1]
+
+            row = build_row_from_data(tab, kind, indicator_field, indicator, data or {})
+
+            if status != "ALL" and row["status"] != status:
+                continue
+
+            if tab == 1:
+                tri = (triage or "ALL").upper()
+                if tri == "OPEN":
+                    if not (row["status"] == "RED" and row["disposition"] == ""):
+                        continue
+                elif tri == "TRIAGED":
+                    if row["disposition"] == "":
+                        continue
+
+            if tab in (3, 22):
+                ls = (listing_state or "ALL").upper()
+                if ls != "ALL" and row["listing_state"] != ls:
+                    continue
+
+            if not row_matches_q(tab, row, q_lower):
+                continue
+
+            rows.append(row)
+
+        if cursor == 0:
+            break
+
+    reverse = (order.lower() != "asc")
+
+    if sort == "count_total":
+        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
+    elif sort == "status":
+        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
+        rows.sort(key=lambda x: (rank.get(x["status"], 99), x.get("last_seen") or ""), reverse=False)
+        if reverse:
+            rows.reverse()
+    elif sort == "listing_state":
+        rows.sort(key=lambda x: (x.get("listing_state") or "", x.get("last_seen") or ""), reverse=reverse)
+    elif sort == "vt_state":
+        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
+    elif sort == "computer":
+        rows.sort(key=lambda x: (x.get("computer") or "").lower(), reverse=reverse)
+    elif sort == "image":
+        rows.sort(key=lambda x: (x.get("image") or "").lower(), reverse=reverse)
+    elif sort == "source":
+        rows.sort(key=lambda x: (x.get("source") or "").lower(), reverse=reverse)
+    elif sort == "computer_last":
+        rows.sort(key=lambda x: (x.get("computer_last") or "").lower(), reverse=reverse)
+    elif sort == "indicator":
+        rows.sort(key=lambda x: (x.get(indicator_field) or "").lower(), reverse=reverse)
+    else:
+        rows.sort(key=lambda x: x.get("last_seen") or "", reverse=reverse)
+
+    total = len(rows)
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_rows = rows[start:end]
+
+    return templates.TemplateResponse(
+        "partials/sysmon_table.html",
+        {
+            "request": request,
+            "tab": tab,
+            "rows": page_rows,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "status": status,
+            "triage": triage,
+            "listing_state": listing_state,
+            "q": q,
+            "sort": sort,
+            "order": order,
+            "indicator_label": indicator_label,
+            "indicator_field": indicator_field,
+        },
+    )
 
 async def recheck_vt_stage(sha256: str) -> None:
     """
@@ -516,16 +916,27 @@ async def ui_settings_tab(
 @app.post("/ui/settings/blacklist")
 async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
     form = await request.form()
-    refresh_time = (form.get("blacklist_refresh_time") or "").strip()
-    update_time = (form.get("blacklist_update_time") or "").strip()
 
-    # Minimal validation: keep simple; allow cron-like strings.
-    if not refresh_time:
-        refresh_time = DEFAULT_SETTINGS["blacklist_refresh_time"]
-    if not update_time:
-        update_time = DEFAULT_SETTINGS["blacklist_update_time"]
+    def as_int_str(v: str, default: str, lo: int, hi: int) -> str:
+        try:
+            n = int((v or "").strip())
+            return str(max(lo, min(hi, n)))
+        except Exception:
+            return default
 
-    # Rebuild vendors list from submitted fields
+    update_interval = as_int_str(
+        form.get("blacklist_update_interval_min"),
+        DEFAULT_SETTINGS["blacklist_update_interval_min"],
+        5,
+        1440,
+    )
+    recheck_batch = as_int_str(
+        form.get("blacklist_recheck_batch"),
+        DEFAULT_SETTINGS["blacklist_recheck_batch"],
+        200,
+        20000,
+    )
+
     s = await load_settings()
     vendors = s.get("vendors") or DEFAULT_VENDORS
     new_vendors = []
@@ -539,12 +950,17 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
             "key": key,
             "name": v.get("name") or key,
             "enabled": bool(enabled),
+            "type": v.get("type") or "",
             "url": url,
+            "min_fetch_min": int(v.get("min_fetch_min") or 60),
+            "etag": v.get("etag") or "",
+            "last_modified": v.get("last_modified") or "",
+            "last_fetch_at": float(v.get("last_fetch_at") or 0.0),
         })
 
     await save_settings({
-        "blacklist_refresh_time": refresh_time,
-        "blacklist_update_time": update_time,
+        "blacklist_update_interval_min": update_interval,
+        "blacklist_recheck_batch": recheck_batch,
     })
     await save_vendors(new_vendors)
 
@@ -755,6 +1171,7 @@ async def enrich_process(event: ProcessEvent):
     if rep:
         await r.hincrby(key, "count_total", 1)
         await r.hset(key, mapping={"last_seen": now})
+        await sync_sha256_indexes(event.sha256)
         return {
             "sha256": event.sha256,
             "status": rep.get("status"),
@@ -777,6 +1194,8 @@ async def enrich_process(event: ProcessEvent):
             "uuid": str(uuid.uuid4()),
         },
     )
+    await r.sadd(KNOWN_SHA256_SET, event.sha256)
+    await sync_sha256_indexes(event.sha256)
 
     if await vt_enabled_setting():
         await r.lpush(VT_QUEUE, event.sha256)
@@ -850,6 +1269,7 @@ async def enrich_process_bulk(request: Request):
         if rep:
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now})
+            await sync_sha256_indexes(event.sha256)
         else:
             await r.hset(
                 key,
@@ -865,6 +1285,8 @@ async def enrich_process_bulk(request: Request):
                     "uuid": str(uuid.uuid4()),
                 },
             )
+            await r.sadd(KNOWN_SHA256_SET, event.sha256)
+            await sync_sha256_indexes(event.sha256)
 
         if await vt_enabled_setting() and not rep:
             await r.lpush(VT_QUEUE, event.sha256)
@@ -899,6 +1321,7 @@ async def enrich_network(event: NetworkEvent):
     if rep:
         await r.hincrby(key, "count_total", 1)
         await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        await sync_ip_indexes(ip_norm)
         return {
             "destination_ip": ip_norm,
             "status": rep.get("status"),
@@ -925,6 +1348,7 @@ async def enrich_network(event: NetworkEvent):
     )
     await r.sadd(STAGED_SET_IP, ip_norm)
     await r.sadd("greycode:known:ips", ip_norm)
+    await sync_ip_indexes(ip_norm)
 
     # >>> ingest-time blacklist check (only for new records)
     vendors = await load_vendors(r)
@@ -1014,6 +1438,7 @@ async def enrich_network_bulk(request: Request):
         if rep:
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+            await sync_ip_indexes(ip_norm)
         else:
             await r.hset(
                 key,
@@ -1032,6 +1457,7 @@ async def enrich_network_bulk(request: Request):
             )
             await r.sadd(STAGED_SET_IP, ip_norm)
             await r.sadd("greycode:known:ips", ip_norm)
+            await sync_ip_indexes(ip_norm)
 
             hits = await check_indicator_hits(r, indicator_type="ip", indicator=ip_norm, vendors=vendors)
             await update_indicator_record(
@@ -1071,6 +1497,7 @@ async def enrich_dns(event: DnsEvent):
     if rep:
         await r.hincrby(key, "count_total", 1)
         await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+        await sync_domain_indexes(domain_norm)
         return {
             "query_name": domain_norm,
             "status": rep.get("status"),
@@ -1096,6 +1523,7 @@ async def enrich_dns(event: DnsEvent):
     )
     await r.sadd(STAGED_SET_DOMAIN, domain_norm)
     await r.sadd("greycode:known:domains", domain_norm)
+    await sync_domain_indexes(domain_norm)
 
     # >>> ingest-time blacklist check (only for new records)
     vendors = await load_vendors(r)
@@ -1184,6 +1612,7 @@ async def enrich_dns_bulk(request: Request):
         if rep:
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
+            await sync_domain_indexes(domain_norm)
         else:
             await r.hset(
                 key,
@@ -1202,6 +1631,7 @@ async def enrich_dns_bulk(request: Request):
             )
             await r.sadd(STAGED_SET_DOMAIN, domain_norm)
             await r.sadd("greycode:known:domains", domain_norm)
+            await sync_domain_indexes(domain_norm)
 
             hits = await check_indicator_hits(r, indicator_type="domain", indicator=domain_norm, vendors=vendors)
             await update_indicator_record(
@@ -1226,6 +1656,7 @@ async def enrich_dns_bulk(request: Request):
 @app.post("/ui/hash/{sha256}/accept")
 async def ui_hash_accept(sha256: str, request: Request, _auth=Depends(require_login)):
     await set_disposition(sha256, "ACCEPTED", actor="ui")
+    await sync_sha256_indexes(sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/escalate")
@@ -1236,27 +1667,28 @@ async def ui_hash_escalate(sha256: str, request: Request, ticket_id: str = Form(
         return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
     await set_disposition(sha256, "ESCALATED", ticket_id=ticket_id, actor="ui")
+    await sync_sha256_indexes(sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/clear")
 async def ui_hash_clear(sha256: str, request: Request, _auth=Depends(require_login)):
     await clear_disposition(sha256, actor="ui")
+    await sync_sha256_indexes(sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/recheck")
 async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_login)):
     await recheck_vt_stage(sha256)
+    await sync_sha256_indexes(sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
-@app.post("/ui/hash/{sha256}/delete")
-async def ui_hash_delete(sha256: str, request: Request, _auth=Depends(require_login)):
-    await delete_hash_everywhere(sha256)
-    return  HTMLResponse(
-        "<div class='card'><p class='muted'>Deleted.</p>"
-        "<div class='actions' style='margin-top:12px;'>"
-        "<button class='btn' type='button' onclick='gcCloseDrawer()'>Close</button>"
-        "</div></div>"
-    )
+async def delete_hash_everywhere(sha256_value: str) -> None:
+    key = f"greycode:sha256:{sha256_value}"
+    await r.delete(key)
+    await r.srem(STAGED_SET, sha256_value)
+    await r.lrem(VT_QUEUE, 0, sha256_value)
+    await remove_from_all_indexes(r, kind="sha256", indicator=sha256_value)
+    await r.srem(KNOWN_SHA256_SET, sha256_value)
 
 @app.post("/ui/ip/{ip}/accept")
 async def ui_ip_accept(ip: str, request: Request, _auth=Depends(require_login)):
@@ -1319,6 +1751,7 @@ async def ui_bulk_action(
     if action == "accept":
         for h in hashes:
             await set_disposition(h, "ACCEPTED", actor="ui")
+            await sync_sha256_indexes(h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "escalate":
@@ -1327,16 +1760,19 @@ async def ui_bulk_action(
             return RedirectResponse(url="/ui", status_code=303)
         for h in hashes:
             await set_disposition(h, "ESCALATED", ticket_id=ticket_id, actor="ui")
+            await sync_sha256_indexes(h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "clear":
         for h in hashes:
             await clear_disposition(h, actor="ui")
+            await sync_sha256_indexes(h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "recheck":
         for h in hashes:
             await recheck_vt_stage(h)
+            await sync_sha256_indexes(h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "delete":
@@ -1500,21 +1936,18 @@ async def ui_sysmon(
 async def ui_sysmon_table(
     request: Request,
     event_id: int = ApiPath(..., ge=1),
-
     status: str = Query("ALL"),
     q: str = Query(""),
     sort: str = Query("last_seen"),
     order: str = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=10, le=2000),
-
     triage: str = Query("ALL"),
     listing_state: str = Query("ALL"),
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
 
-    # Map tab -> redis key pattern + primary field name
     if tab == 1:
         pattern = "greycode:sha256:*"
         indicator_label = "SHA256"
@@ -1540,121 +1973,55 @@ async def ui_sysmon_table(
     if status not in allowed_status:
         status = "ALL"
 
-    q_lower = (q or "").strip().lower()
+    indexed_sorts = {"last_seen", "count_total", "rare"}
 
-    rows = []
-    cursor = 0
+    if sort not in indexed_sorts:
+        return await legacy_ui_sysmon_table(
+            request,
+            tab=tab,
+            indicator_label=indicator_label,
+            indicator_field=indicator_field,
+            kind=kind,
+            pattern=pattern,
+            status=status,
+            q=q,
+            sort=sort,
+            order=order,
+            page=page,
+            page_size=page_size,
+            triage=triage,
+            listing_state=listing_state,
+        )
 
-    while True:
-        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
-        for key in keys:
-            data = await r.hgetall(key)
-            indicator = key.split(":", 2)[-1]
-
-            row = {
-                "kind": kind,
-                indicator_field: indicator,
-                "status": (data.get("status") or "GREY").upper(),
-                "listing_state": (data.get("listing_state") or "").upper(),
-                "vt_state": (data.get("vt_state") or "").upper(),
-                "vt_malicious": int(data.get("vt_malicious") or 0),
-                "disposition": (data.get("disposition") or "").upper(),
-                "ticket_id": data.get("ticket_id") or "",
-                "count_total": int(data.get("count_total") or 0),
-                "first_seen": data.get("first_seen") or "",
-                "last_seen": data.get("last_seen") or "",
-                "source": data.get("source") or "",
-                "computer": data.get("computer") or "",
-                "computer_first": data.get("computer_first") or "",
-                "computer_last": data.get("computer_last") or "",
-                "image": data.get("image") or "",
-                "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
-            }
-
-            # Filters
-            if status != "ALL" and row["status"] != status:
-                continue
-
-            if tab == 1:
-                tri = (triage or "ALL").upper()
-                if tri == "OPEN":
-                    if not (row["status"] == "RED" and row["disposition"] == ""):
-                        continue
-                elif tri == "TRIAGED":
-                    if row["disposition"] == "":
-                        continue
-
-            if tab in (3, 22):
-                ls = (listing_state or "ALL").upper()
-                if ls != "ALL" and row["listing_state"] != ls:
-                    continue
-
-            if q_lower:
-                if tab == 1:
-                    hay = f'{row.get("sha256","")} {row.get("computer","")} {row.get("image","")}'.lower()
-                elif tab == 3:
-                    hay = f'{row.get("ip","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
-                else:
-                    hay = f'{row.get("domain","")} {row.get("computer_first","")} {row.get("computer_last","")}'.lower()
-                if q_lower not in hay:
-                    continue
-
-            rows.append(row)
-
-        if cursor == 0:
-            break
-
-    # Sorting
-    reverse = (order.lower() != "asc")
-
-    if sort == "count_total":
-        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
-    elif sort == "status":
-        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
-        rows.sort(key=lambda x: (rank.get(x["status"], 99), x.get("last_seen") or ""), reverse=False)
-        if reverse:
-            rows.reverse()
-    elif sort == "listing_state":
-        rows.sort(key=lambda x: (x.get("listing_state") or "", x.get("last_seen") or ""), reverse=reverse)
-    elif sort == "vt_state":
-        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
-    elif sort == "computer":
-        rows.sort(key=lambda x: (x.get("computer") or "").lower(), reverse=reverse)
-    elif sort == "image":
-        rows.sort(key=lambda x: (x.get("image") or "").lower(), reverse=reverse)
-    elif sort == "source":
-        rows.sort(key=lambda x: (x.get("source") or "").lower(), reverse=reverse)
-    elif sort == "computer_last":
-        rows.sort(key=lambda x: (x.get("computer_last") or "").lower(), reverse=reverse)
-    elif sort == "indicator":
-        rows.sort(key=lambda x: (x.get(indicator_field) or "").lower(), reverse=reverse)
-    else:
-        rows.sort(key=lambda x: x.get("last_seen") or "", reverse=reverse)
-
-    # Pagination
-    total = len(rows)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_rows = rows[start:end]
+    rows, total = await fetch_indexed_page(
+        tab=tab,
+        kind=kind,
+        indicator_field=indicator_field,
+        status=status,
+        triage=triage,
+        listing_state=listing_state,
+        q=q,
+        sort=sort,
+        order=order,
+        page=page,
+        page_size=page_size,
+    )
 
     return templates.TemplateResponse(
         "partials/sysmon_table.html",
         {
             "request": request,
             "tab": tab,
-            "rows": page_rows,
+            "rows": rows,
             "total": total,
             "page": page,
             "page_size": page_size,
-
             "status": status,
             "triage": triage,
             "listing_state": listing_state,
-
             "q": q,
             "sort": sort,
             "order": order,
-
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
         },
