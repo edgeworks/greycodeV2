@@ -26,7 +26,7 @@ import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
-from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record
+from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record, DEFAULT_VENDORS
 from alerts import AlertRouter
 from user_store import (
     get_user,
@@ -143,33 +143,6 @@ async def vt_enabled_setting() -> bool:
 VENDORS_KEY = "greycode:settings:blacklist_vendors"
 
 VENDORS_KEY = "greycode:blacklist:vendors"
-
-DEFAULT_VENDORS = [
-    {
-        "key": "threatfox_ip",
-        "name": "ThreatFox IPs",
-        "enabled": True,
-        "type": "ip",
-        "url": "https://threatfox.abuse.ch/downloads/ipblocklist/",
-        "min_fetch_min": 5,
-    },
-    {
-        "key": "urlhaus_text",
-        "name": "URLhaus (text)",
-        "enabled": False,
-        "type": "domain",
-        "url": "https://urlhaus.abuse.ch/downloads/text/",
-        "min_fetch_min": 60,
-    },
-    {
-        "key": "spamhaus_drop",
-        "name": "Spamhaus DROP (CIDR)",
-        "enabled": False,
-        "type": "ip_cidr",
-        "url": "https://www.spamhaus.org/drop/drop.txt",
-        "min_fetch_min": 1440,
-    },
-]
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "blacklist_update_interval_min": "60",
