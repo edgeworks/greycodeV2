@@ -26,7 +26,18 @@ import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
-from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record, SET_IP_PREFIX, SET_DOMAIN_PREFIX, CIDR_IP_PREFIX, DEFAULT_VENDORS
+from blacklist_engine import (
+    Vendor, 
+    save_vendors, 
+    load_vendors, 
+    check_indicator_hits, 
+    update_indicator_record, 
+    SET_IP_PREFIX, 
+    SET_DOMAIN_PREFIX, 
+    CIDR_IP_PREFIX, 
+    DEFAULT_VENDORS,
+)
+from blacklist_worker.worker import fetch_vendor
 from alerts import AlertRouter
 from user_store import (
     get_user,
@@ -989,6 +1000,41 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
             "request": request,
             "settings": s,
             "saved": "blacklist",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.post("/ui/vendor/{vendor_key}/fetch")
+async def ui_vendor_fetch_now(
+    request: Request,
+    vendor_key: str,
+    _auth=Depends(require_login),
+):
+    vendors = await load_vendors(r)
+    vendor = next((v for v in vendors if v.key == vendor_key), None)
+    if not vendor:
+        return HTMLResponse("<div class='notice-banner error'><div>Vendor not found.</div></div>", status_code=404)
+
+    changed, updated_vendor = await fetch_vendor(vendor, interval_min=0)
+
+    new_vendors = []
+    for v in vendors:
+        if v.key == vendor_key:
+            new_vendors.append(updated_vendor)
+        else:
+            new_vendors.append(v)
+
+    await save_vendors(r, new_vendors)
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": f"fetch:{vendor_key}",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             **(await get_ui_metrics()),

@@ -60,14 +60,24 @@
                 <div></div>
             {% endif %}
 
-            <a class="btn"
-                href="/ui/vendor/{{ v.key }}/preview"
-                hx-get="/ui/vendor/{{ v.key }}/preview"
-                hx-target="#vendorPreviewContent"
-                hx-swap="innerHTML"
-                hx-on:click="event.preventDefault()">
-                View
-            </a>
+            <div class="vendor-actions">
+                <button class="btn"
+                        type="button"
+                        hx-post="/ui/vendor/{{ v.key }}/fetch"
+                        hx-target="#settingsModalContent"
+                        hx-swap="innerHTML">
+                    Fetch now
+                </button>
+
+                <a class="btn"
+                    href="/ui/vendor/{{ v.key }}/preview"
+                    hx-get="/ui/vendor/{{ v.key }}/preview"
+                    hx-target="#vendorPreviewContent"
+                    hx-swap="innerHTML"
+                    hx-on:click="event.preventDefault()">
+                    View
+                </a>
+                </div>
           </div>
         {% endfor %}
       </div>
