@@ -1109,3 +1109,57 @@ body.profile-modal-open #profileModalPanel {
     grid-column: 2;
   }
 }
+
+body.vendor-preview-modal-open #vendorPreviewBackdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.vendor-preview-modal-open #vendorPreviewPanel {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vendor-row-wide {
+  display: grid;
+  grid-template-columns: 56px 220px minmax(260px, 1fr) minmax(220px, 320px) 96px;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.vendor-preview-box {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(0,0,0,0.18);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+
+.vendor-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.vendor-preview-empty {
+  color: var(--muted);
+}
+
+@media (max-width: 1200px) {
+  .vendor-row-wide {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .vendor-row-wide .vendor-name,
+  .vendor-row-wide .vendor-url,
+  .vendor-row-wide .vendor-apikey,
+  .vendor-row-wide .btn {
+    grid-column: 2;
+  }
+}

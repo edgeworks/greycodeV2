@@ -1,0 +1,34 @@
+<div class="settings-modal-shell">
+  <div class="settings-modal-topbar">
+    <div>
+      <h1>{{ vendor.name }}</h1>
+      <div class="settings-subtitle">Loaded blacklist preview</div>
+    </div>
+
+    <button class="settings-modal-close" type="button" onclick="gcCloseVendorPreviewModal()">✕</button>
+  </div>
+
+  <div class="vendor-preview-meta">
+    <span class="badge">{{ vendor.type }}</span>
+    <span class="badge">{% if vendor.enabled %}Enabled{% else %}Disabled{% endif %}</span>
+    <span class="badge">{{ total }} loaded</span>
+    {% if vendor.last_fetch_at %}
+      <span class="badge">Last fetch: {{ vendor.last_fetch_fmt }}</span>
+    {% endif %}
+  </div>
+
+  {% if truncated %}
+    <p class="muted">Showing first {{ items|length }} of {{ total }} entries.</p>
+  {% endif %}
+
+  {% if items %}
+    <div class="vendor-preview-box">{% for item in items %}{{ item }}
+{% endfor %}</div>
+  {% else %}
+    <div class="vendor-preview-box vendor-preview-empty">No entries currently loaded.</div>
+  {% endif %}
+
+  <div class="settings-actions" style="margin-top:14px;">
+    <button class="btn" type="button" onclick="gcCloseVendorPreviewModal()">Close</button>
+  </div>
+</div>

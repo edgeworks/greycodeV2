@@ -91,6 +91,14 @@
     </div>
   </div>
 
+  <div id="vendorPreviewBackdrop" class="settings-modal-backdrop" onclick="gcCloseVendorPreviewModal()"></div>
+
+  <div id="vendorPreviewPanel" class="settings-modal-panel" aria-hidden="true">
+    <div id="vendorPreviewContent" class="settings-modal-content">
+      <!-- HTMX loads vendor preview here -->
+    </div>
+  </div>
+
   {% block scripts %}
   <script>
     function gcOpenDrawer() {
@@ -164,6 +172,25 @@
     document.body.addEventListener("htmx:afterSwap", function (e) {
       if (e.target && e.target.id === "profileModalContent") {
         gcOpenProfileModal();
+      }
+    });
+  </script>
+  <script>
+    function gcOpenVendorPreviewModal() {
+      document.body.classList.add("vendor-preview-modal-open");
+      const p = document.getElementById("vendorPreviewPanel");
+      if (p) p.setAttribute("aria-hidden", "false");
+    }
+
+    function gcCloseVendorPreviewModal() {
+      document.body.classList.remove("vendor-preview-modal-open");
+      const p = document.getElementById("vendorPreviewPanel");
+      if (p) p.setAttribute("aria-hidden", "true");
+    }
+
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "vendorPreviewContent") {
+        gcOpenVendorPreviewModal();
       }
     });
   </script>

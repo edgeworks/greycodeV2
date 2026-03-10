@@ -26,7 +26,7 @@ import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 from config_store import cfg_get_bool, cfg_get, cfg_set
-from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record, DEFAULT_VENDORS
+from blacklist_engine import load_vendors, check_indicator_hits, update_indicator_record, SET_IP_PREFIX, SET_DOMAIN_PREFIX, CIDR_IP_PREFIX, DEFAULT_VENDORS
 from alerts import AlertRouter
 from user_store import (
     get_user,
@@ -992,6 +992,78 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             **(await get_ui_metrics()),
+        },
+    )
+
+@app.get("/ui/vendor/{vendor_key}/preview", response_class=HTMLResponse)
+async def ui_vendor_preview(
+    request: Request,
+    vendor_key: str,
+    _auth=Depends(require_login),
+):
+    vendors = await load_vendors(r)
+    vendor = next((v for v in vendors if v.key == vendor_key), None)
+    if not vendor:
+        return HTMLResponse(
+            "<div class='settings-modal-shell'><div class='notice-banner error'><div>Vendor not found.</div></div></div>",
+            status_code=404,
+        )
+
+    items: list[str] = []
+    total = 0
+    truncated = False
+    preview_limit = 500
+
+    if vendor.type in ("ip", "ip_port_json"):
+        set_key = f"{SET_IP_PREFIX}{vendor.key}"
+        total = int(await r.scard(set_key))
+        cursor = 0
+        while len(items) < preview_limit:
+            cursor, batch = await r.sscan(set_key, cursor=cursor, count=200)
+            items.extend(batch)
+            if cursor == 0:
+                break
+        if len(items) > preview_limit:
+            items = items[:preview_limit]
+        truncated = total > len(items)
+
+    elif vendor.type in ("domain", "domain_json"):
+        set_key = f"{SET_DOMAIN_PREFIX}{vendor.key}"
+        total = int(await r.scard(set_key))
+        cursor = 0
+        while len(items) < preview_limit:
+            cursor, batch = await r.sscan(set_key, cursor=cursor, count=200)
+            items.extend(batch)
+            if cursor == 0:
+                break
+        if len(items) > preview_limit:
+            items = items[:preview_limit]
+        truncated = total > len(items)
+
+    elif vendor.type == "ip_cidr":
+        raw = await r.get(f"{CIDR_IP_PREFIX}{vendor.key}")
+        cidrs = json.loads(raw or "[]")
+        if not isinstance(cidrs, list):
+            cidrs = []
+        total = len(cidrs)
+        items = [str(x) for x in cidrs[:preview_limit]]
+        truncated = total > len(items)
+
+    else:
+        items = []
+        total = 0
+
+    items = sorted(items)
+
+    return templates.TemplateResponse(
+        "partials/vendor_preview_modal.html",
+        {
+            "request": request,
+            "vendor": vendor,
+            "items": items,
+            "total": total,
+            "truncated": truncated,
+            "last_fetch_fmt": fmt_epoch(str(vendor.last_fetch_at)) if vendor.last_fetch_at else "-",
         },
     )
 
