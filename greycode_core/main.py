@@ -29,7 +29,8 @@ from config_store import cfg_get_bool, cfg_get, cfg_set
 from blacklist_engine import (
     Vendor, 
     save_vendors, 
-    load_vendors, 
+    load_vendors,
+    fetch_vendor, 
     check_indicator_hits, 
     update_indicator_record, 
     SET_IP_PREFIX, 
@@ -37,7 +38,6 @@ from blacklist_engine import (
     CIDR_IP_PREFIX, 
     DEFAULT_VENDORS,
 )
-from blacklist_worker.worker import fetch_vendor
 from alerts import AlertRouter
 from user_store import (
     get_user,

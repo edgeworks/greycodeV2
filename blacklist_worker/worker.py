@@ -5,10 +5,6 @@ import asyncio
 import os
 import time
 from typing import List, Tuple
-import base64
-import hashlib
-from cryptography.fernet import Fernet, InvalidToken
-import httpx
 import redis.asyncio as redis
 
 from greycode_core.alerts.router import AlertRouter
@@ -18,6 +14,7 @@ from greycode_core.blacklist_engine import (
     Vendor,
     load_vendors,
     save_vendors,
+    fetch_vendor,
     parse_ip_lines,
     parse_domain_lines,
     parse_spamhaus_drop_cidrs,
@@ -47,22 +44,6 @@ DEFAULT_RECHECK_BATCH = 2000
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 alert_router = AlertRouter()
 
-def _fernet() -> Fernet:
-    secret = os.getenv("GREYCODE_SESSION_SECRET", "")
-    if not secret:
-        raise RuntimeError("GREYCODE_SESSION_SECRET not set (needed to decrypt vendor API keys).")
-    digest = hashlib.sha256(secret.encode("utf-8")).digest()
-    key = base64.urlsafe_b64encode(digest)
-    return Fernet(key)
-
-
-def decrypt_secret(ciphertext: str) -> str:
-    if not ciphertext:
-        return ""
-    try:
-        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-    except InvalidToken:
-        return ""
 
 def _clamp(n: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, n))
@@ -137,125 +118,6 @@ async def _get_recheck_batch() -> int:
     except Exception:
         n = DEFAULT_RECHECK_BATCH
     return max(200, min(20000, n))
-
-
-async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
-    """
-    Returns (changed, updated_vendor_metadata).
-    Enforces vendor.min_fetch_min, supports ETag/Last-Modified.
-    """
-    now = time.time()
-    effective_min = max(int(v.min_fetch_min or 60), int(interval_min))
-    due = (now - float(v.last_fetch_at or 0.0)) >= (effective_min * 60)
-
-    print(f"[blacklist] vendor={v.key} enabled={v.enabled} type={v.type} due={due} effective_min={effective_min}, flush=True")
-
-    if not v.enabled:
-        print(f"[blacklist] skip vendor={v.key} reason=disabled, flush=True")
-        return (False, v)
-    if not due:
-        print(f"[blacklist] skip vendor={v.key} reason=not_due last_fetch_at={v.last_fetch_at}, flush=True")
-        return (False, v)
-
-    headers = {}
-    if v.etag:
-        headers["If-None-Match"] = v.etag
-    if v.last_modified:
-        headers["If-Modified-Since"] = v.last_modified
-
-    effective_url = v.url
-    if v.requires_api_key:
-        enc = await r.hget(CFG_KEY, v.api_key_setting or "")
-        api_key = decrypt_secret(enc or "")
-        if not api_key:
-            print(f"[blacklist] skip vendor={v.key} reason=missing_api_key setting={v.api_key_setting}, flush=True")
-            return (False, v)
-        sep = "&" if "?" in effective_url else "?"
-        effective_url = f"{effective_url}{sep}auth-key={api_key}"
-
-    print(f"[blacklist] fetching vendor={v.key} url={effective_url}, flush=True")
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0, trust_env=True) as client:
-            resp = await client.get(effective_url, headers=headers)
-    except Exception as e:
-        print(f"[blacklist] fetch failed vendor={v.key} error={type(e).__name__}: {e}, flush=True")
-        return (False, v)
-
-    print(f"[blacklist] fetched vendor={v.key} status={resp.status_code} bytes={len(resp.text or '')}, flush=True")
-
-    if resp.status_code == 304:
-        v.last_fetch_at = now
-        print(f"[blacklist] vendor={v.key} not_modified, flush=True")
-        return (False, v)
-
-    if resp.status_code != 200:
-        print(f"[blacklist] vendor={v.key} unexpected_status={resp.status_code}, flush=True")
-        return (False, v)
-
-    text = resp.text or ""
-    print(f"[blacklist] vendor={v.key} body_head={text[:400]!r}, flush=True")
-
-    if v.type == "ip":
-        items = parse_ip_lines(text)
-        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}, flush=True")
-        set_key = f"{SET_IP_PREFIX}{v.key}"
-        pipe = r.pipeline()
-        pipe.delete(set_key)
-        if items:
-            pipe.sadd(set_key, *items)
-        await pipe.execute()
-        print(f"[blacklist] vendor={v.key} redis_set={set_key} count={len(items)}, flush=True")
-
-    elif v.type == "domain":
-        items = parse_domain_lines(text)
-        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}, flush=True")
-        set_key = f"{SET_DOMAIN_PREFIX}{v.key}"
-        pipe = r.pipeline()
-        pipe.delete(set_key)
-        if items:
-            pipe.sadd(set_key, *items)
-        await pipe.execute()
-        print(f"[blacklist] vendor={v.key} redis_set={set_key} count={len(items)}, flush=True")
-
-    elif v.type == "domain_json":
-        items = parse_threatfox_domains_json(text)
-        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}, flush=True")
-        set_key = f"{SET_DOMAIN_PREFIX}{v.key}"
-        pipe = r.pipeline()
-        pipe.delete(set_key)
-        if items:
-            pipe.sadd(set_key, *items)
-        await pipe.execute()
-        print(f"[blacklist] vendor={v.key} redis_set={set_key} count={len(items)}, flush=True")
-
-    elif v.type == "ip_port_json":
-        items = parse_threatfox_ip_port_json(text)
-        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}, flush=True")
-        set_key = f"{SET_IP_PREFIX}{v.key}"
-        pipe = r.pipeline()
-        pipe.delete(set_key)
-        if items:
-            pipe.sadd(set_key, *items)
-        await pipe.execute()
-        print(f"[blacklist] vendor={v.key} redis_set={set_key} count={len(items)}, flush=True")
-
-    elif v.type == "ip_cidr":
-        cidrs = parse_spamhaus_drop_cidrs(text)
-        print(f"[blacklist] vendor={v.key} parsed_cidrs={len(cidrs)} sample={cidrs[:5]}, flush=True")
-        await r.set(f"{CIDR_IP_PREFIX}{v.key}", __import__("json").dumps(cidrs))
-        print(f"[blacklist] vendor={v.key} redis_cidr_key={CIDR_IP_PREFIX}{v.key} count={len(cidrs)}, flush=True")
-
-    else:
-        print(f"[blacklist] vendor={v.key} unknown_type={v.type}, flush=True")
-        return (False, v)
-
-    v.last_fetch_at = now
-    v.etag = resp.headers.get("ETag") or v.etag
-    v.last_modified = resp.headers.get("Last-Modified") or v.last_modified
-
-    print(f"[blacklist] vendor={v.key} fetch_complete, flush=True")
-    return (True, v)
 
 
 async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:

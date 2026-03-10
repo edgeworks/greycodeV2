@@ -6,6 +6,11 @@ import time
 import ipaddress
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
+import os
+import base64
+import hashlib
+from cryptography.fernet import Fernet, InvalidToken
+import httpx
 
 try:
     # worker containers: /app/greycode_core/...
@@ -111,6 +116,22 @@ def split_ip_port(value: str) -> tuple[str, str]:
     # likely plain IP (or unbracketed IPv6 with no port handling)
     return (s, "")
 
+def _fernet() -> Fernet:
+    secret = os.getenv("GREYCODE_SESSION_SECRET", "")
+    if not secret:
+        raise RuntimeError("GREYCODE_SESSION_SECRET not set (needed to decrypt vendor API keys).")
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
+
+
+def decrypt_secret(ciphertext: str) -> str:
+    if not ciphertext:
+        return ""
+    try:
+        return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        return ""
 
 @dataclass
 class Vendor:
@@ -180,6 +201,117 @@ async def save_vendors(r, vendors: List[Vendor]) -> None:
     ]
     await r.set(VENDORS_KEY, _json_dumps(payload))
 
+async def fetch_vendor(r, v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
+    """
+    Returns (changed, updated_vendor_metadata).
+    Enforces vendor.min_fetch_min, supports ETag/Last-Modified.
+    """
+    now = time.time()
+    effective_min = max(int(v.min_fetch_min or 60), int(interval_min))
+    due = (now - float(v.last_fetch_at or 0.0)) >= (effective_min * 60)
+
+    print(f"[blacklist] vendor={v.key} enabled={v.enabled} type={v.type} due={due} effective_min={effective_min}", flush=True)
+
+    if not v.enabled:
+        print(f"[blacklist] skip vendor={v.key} reason=disabled", flush=True)
+        return (False, v)
+    if not due:
+        print(f"[blacklist] skip vendor={v.key} reason=not_due last_fetch_at={v.last_fetch_at}", flush=True)
+        return (False, v)
+
+    headers = {}
+    if v.etag:
+        headers["If-None-Match"] = v.etag
+    if v.last_modified:
+        headers["If-Modified-Since"] = v.last_modified
+
+    effective_url = v.url
+    if v.requires_api_key:
+        enc = await r.hget(CFG_KEY, v.api_key_setting or "")
+        api_key = decrypt_secret(enc or "")
+        if not api_key:
+            print(f"[blacklist] skip vendor={v.key} reason=missing_api_key setting={v.api_key_setting}", flush=True)
+            return (False, v)
+        sep = "&" if "?" in effective_url else "?"
+        effective_url = f"{effective_url}{sep}auth-key={api_key}"
+
+    print(f"[blacklist] fetching vendor={v.key} url={effective_url}", flush=True)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0, trust_env=True) as client:
+            resp = await client.get(effective_url, headers=headers)
+    except Exception as e:
+        print(f"[blacklist] fetch failed vendor={v.key} error={type(e).__name__}: {e}", flush=True)
+        return (False, v)
+
+    print(f"[blacklist] fetched vendor={v.key} status={resp.status_code} bytes={len(resp.text or '')}", flush=True)
+
+    if resp.status_code == 304:
+        v.last_fetch_at = now
+        print(f"[blacklist] vendor={v.key} not_modified", flush=True)
+        return (False, v)
+
+    if resp.status_code != 200:
+        print(f"[blacklist] vendor={v.key} unexpected_status={resp.status_code}", flush=True)
+        return (False, v)
+
+    text = resp.text or ""
+
+    if v.type == "ip":
+        items = parse_ip_lines(text)
+        set_key = f"{SET_IP_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}", flush=True)
+
+    elif v.type == "domain":
+        items = parse_domain_lines(text)
+        set_key = f"{SET_DOMAIN_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}", flush=True)
+
+    elif v.type == "domain_json":
+        items = parse_threatfox_domains_json(text)
+        set_key = f"{SET_DOMAIN_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}", flush=True)
+
+    elif v.type == "ip_port_json":
+        items = parse_threatfox_ip_port_json(text)
+        set_key = f"{SET_IP_PREFIX}{v.key}"
+        pipe = r.pipeline()
+        pipe.delete(set_key)
+        if items:
+            pipe.sadd(set_key, *items)
+        await pipe.execute()
+        print(f"[blacklist] vendor={v.key} parsed_items={len(items)} sample={items[:5]}", flush=True)
+
+    elif v.type == "ip_cidr":
+        cidrs = parse_spamhaus_drop_cidrs(text)
+        await r.set(f"{CIDR_IP_PREFIX}{v.key}", json.dumps(cidrs))
+        print(f"[blacklist] vendor={v.key} parsed_cidrs={len(cidrs)} sample={cidrs[:5]}", flush=True)
+
+    else:
+        print(f"[blacklist] vendor={v.key} unknown_type={v.type}", flush=True)
+        return (False, v)
+
+    v.last_fetch_at = now
+    v.etag = resp.headers.get("ETag") or v.etag
+    v.last_modified = resp.headers.get("Last-Modified") or v.last_modified
+
+    print(f"[blacklist] vendor={v.key} fetch_complete", flush=True)
+    return (True, v)
 
 def vendor_set_key(v: Vendor) -> str:
     if v.type in ("ip", "ip_port_json"):
