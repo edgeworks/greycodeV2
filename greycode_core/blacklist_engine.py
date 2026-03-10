@@ -242,25 +242,59 @@ def parse_spamhaus_drop_cidrs(text: str) -> List[str]:
 def parse_threatfox_domains_json(text: str) -> List[str]:
     """
     ThreatFox domains_recent.json export.
-    Tries multiple field names defensively.
+
+    Observed shape:
+    {
+        "1762739": [
+            {
+                "ioc_value": "example.com",
+                "ioc_type": "domain",
+                ...
+            }
+        ],
+        ...
+    }
+
+    Also accepts list-style payloads defensively.
     """
-    payload = _json_loads(text or "[]", [])
-    if isinstance(payload, dict):
-        rows = payload.get("data") or payload.get("results") or payload.get("ioc_list") or []
-    elif isinstance(payload, list):
-        rows = payload
-    else:
-        rows = []
+    payload = _json_loads(text or "{}", {})
+    rows: List[dict] = []
+
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                rows.append(item)
+
+    elif isinstance(payload, dict):
+        # old/alternative shapes
+        if isinstance(payload.get("data"), list):
+            for item in payload["data"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        elif isinstance(payload.get("results"), list):
+            for item in payload["results"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        elif isinstance(payload.get("ioc_list"), list):
+            for item in payload["ioc_list"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        else:
+            # ThreatFox export shape: dict[id] -> [ {ioc...}, ... ]
+            for value in payload.values():
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            rows.append(item)
+                elif isinstance(value, dict):
+                    rows.append(value)
 
     out: List[str] = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-
         candidates = [
             row.get("domain"),
-            row.get("ioc"),
             row.get("ioc_value"),
+            row.get("ioc"),
             row.get("host"),
         ]
 
@@ -276,26 +310,59 @@ def parse_threatfox_domains_json(text: str) -> List[str]:
 def parse_threatfox_ip_port_json(text: str) -> List[str]:
     """
     ThreatFox ip-port_recent.json export.
-    Extract only the IP part because Greycode Sysmon 3 keys on DestinationIp.
+
+    Observed shape:
+    {
+        "1762739": [
+            {
+                "ioc_value": "1.2.3.4:443",
+                "ioc_type": "ip:port",
+                ...
+            }
+        ],
+        ...
+    }
+
+    We extract only the IP because Greycode Sysmon 3 keys on DestinationIp.
     """
-    payload = _json_loads(text or "[]", [])
-    if isinstance(payload, dict):
-        rows = payload.get("data") or payload.get("results") or payload.get("ioc_list") or []
-    elif isinstance(payload, list):
-        rows = payload
-    else:
-        rows = []
+    payload = _json_loads(text or "{}", {})
+    rows: List[dict] = []
+
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                rows.append(item)
+
+    elif isinstance(payload, dict):
+        if isinstance(payload.get("data"), list):
+            for item in payload["data"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        elif isinstance(payload.get("results"), list):
+            for item in payload["results"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        elif isinstance(payload.get("ioc_list"), list):
+            for item in payload["ioc_list"]:
+                if isinstance(item, dict):
+                    rows.append(item)
+        else:
+            # ThreatFox export shape: dict[id] -> [ {ioc...}, ... ]
+            for value in payload.values():
+                if isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            rows.append(item)
+                elif isinstance(value, dict):
+                    rows.append(value)
 
     out: List[str] = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-
         candidates = [
             row.get("ip"),
             row.get("ip_address"),
-            row.get("ioc"),
             row.get("ioc_value"),
+            row.get("ioc"),
             row.get("ip_port"),
         ]
 
@@ -303,6 +370,7 @@ def parse_threatfox_ip_port_json(text: str) -> List[str]:
             raw = str(candidate or "").strip()
             if not raw:
                 continue
+
             host, _port = split_ip_port(raw)
             try:
                 out.append(normalize_ip(host))
