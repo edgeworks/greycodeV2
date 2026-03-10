@@ -147,6 +147,7 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
     now = time.time()
     effective_min = max(int(v.min_fetch_min or 60), int(interval_min))
     due = (now - float(v.last_fetch_at or 0.0)) >= (effective_min * 60)
+    print(f"[blacklist] fetching {v.key} -> {effective_url}")
 
     if not v.enabled:
         return (False, v)
@@ -169,9 +170,10 @@ async def fetch_vendor(v: Vendor, *, interval_min: int) -> Tuple[bool, Vendor]:
         effective_url = f"{effective_url}{sep}auth-key={api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, trust_env=True) as client:
             resp = await client.get(effective_url, headers=headers)
-    except Exception:
+    except Exception as e:
+        print(f"[blacklist] fetch failed {v.key}: {e}")
         return (False, v)
 
     if resp.status_code == 304:

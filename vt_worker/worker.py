@@ -155,7 +155,7 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
     url = VT_URL.format(sha256)
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, trust_env=True) as client:
             resp = await client.get(url, headers=headers)
     except Exception:
         await r.hset(
