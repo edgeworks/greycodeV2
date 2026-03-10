@@ -181,7 +181,7 @@ async def update_cycle(run_reason: str) -> None:
     changed_any = False
     new_vendors: List[Vendor] = []
     for v in vendors:
-        changed, v2 = await fetch_vendor(v, interval_min=interval_min)
+        changed, v2 = await fetch_vendor(r, v, interval_min=interval_min)
         changed_any = changed_any or changed
         new_vendors.append(v2)
 

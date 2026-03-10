@@ -1017,7 +1017,7 @@ async def ui_vendor_fetch_now(
     if not vendor:
         return HTMLResponse("<div class='notice-banner error'><div>Vendor not found.</div></div>", status_code=404)
 
-    changed, updated_vendor = await fetch_vendor(vendor, interval_min=0)
+    changed, updated_vendor = await fetch_vendor(r, vendor, interval_min=0)
 
     new_vendors = []
     for v in vendors:
