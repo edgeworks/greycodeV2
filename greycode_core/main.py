@@ -211,17 +211,41 @@ async def load_settings() -> dict[str, Any]:
     s = {**DEFAULT_SETTINGS, **(stored or {})}
 
     vendors_json = await r.get(VENDORS_KEY)
+
+    stored_vendors = []
     if vendors_json:
         try:
-            vendors = json.loads(vendors_json)
-            if isinstance(vendors, list):
-                s["vendors"] = vendors
-            else:
-                s["vendors"] = DEFAULT_VENDORS
+            parsed = json.loads(vendors_json)
+            if isinstance(parsed, list):
+                stored_vendors = parsed
         except Exception:
-            s["vendors"] = DEFAULT_VENDORS
-    else:
-        s["vendors"] = DEFAULT_VENDORS
+            stored_vendors = []
+
+    default_by_key = {
+        v["key"]: v
+        for v in DEFAULT_VENDORS
+        if isinstance(v, dict) and v.get("key")
+    }
+
+    stored_by_key = {
+        v.get("key"): v
+        for v in stored_vendors
+        if isinstance(v, dict) and v.get("key")
+    }
+
+    merged_vendors = []
+
+    # start with engine defaults, then overlay stored values
+    for key, default_vendor in default_by_key.items():
+        stored_vendor = stored_by_key.get(key, {})
+        merged_vendors.append({**default_vendor, **stored_vendor})
+
+    # preserve unknown/custom vendors already stored in redis
+    for key, stored_vendor in stored_by_key.items():
+        if key not in default_by_key:
+            merged_vendors.append(stored_vendor)
+
+    s["vendors"] = merged_vendors
 
     vt_key_plain = decrypt_secret(s.get("vt_api_key_enc") or "")
     s["vt_key_masked"] = mask_secret(vt_key_plain)
@@ -915,12 +939,19 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
 
     s = await load_settings()
     vendors = s.get("vendors") or DEFAULT_VENDORS
+
+    # Rebuild vendors from the merged view so new defaults are not lost on save
     new_vendors = []
+    seen_keys = set()
 
     for v in vendors:
-        key = v.get("key")
-        if not key:
+        if not isinstance(v, dict):
             continue
+
+        key = v.get("key")
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
 
         enabled = form.get(f"vendor_enabled_{key}") is not None
         url = (form.get(f"vendor_url_{key}") or v.get("url") or "").strip()
