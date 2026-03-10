@@ -13,7 +13,7 @@
     <span class="badge">{% if vendor.enabled %}Enabled{% else %}Disabled{% endif %}</span>
     <span class="badge">{{ total }} loaded</span>
     {% if vendor.last_fetch_at %}
-      <span class="badge">Last fetch: {{ vendor.last_fetch_fmt }}</span>
+      <span class="badge">Last fetch: {{ last_fetch_fmt }}</span>
     {% endif %}
   </div>
 
