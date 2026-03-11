@@ -450,6 +450,14 @@ async def sync_domain_indexes(domain_value: str) -> None:
         listing_state=(data.get("listing_state") or "").upper(),
     )
 
+def should_refresh_index(last_sync_ts: Optional[str], now_ts: float, min_interval_sec: int = 30) -> bool:
+    if not last_sync_ts:
+        return True
+    try:
+        prev = float(last_sync_ts)
+    except (TypeError, ValueError):
+        return True
+    return (now_ts - prev) >= min_interval_sec
 
 def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: str, data: dict[str, str]) -> dict[str, Any]:
     row = {
@@ -1343,6 +1351,9 @@ async def enrich_process_bulk(request: Request):
     accepted = 0
     rejected = 0
     errors = []
+    start_perf = time.perf_counter()
+    new_count = 0
+    existing_count = 0
 
     vt_enabled = await vt_enabled_setting()
 
@@ -1359,10 +1370,12 @@ async def enrich_process_bulk(request: Request):
         rep = await r.hgetall(key)
         now = datetime.datetime.utcnow().isoformat()
         if rep:
+            existing_count += 1
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now})
             await sync_sha256_indexes(event.sha256)
         else:
+            new_count += 1
             await r.hset(
                 key,
                 mapping={
@@ -1384,6 +1397,16 @@ async def enrich_process_bulk(request: Request):
             await r.lpush(VT_QUEUE, event.sha256)
 
         accepted += 1
+
+    logger.warning(
+        "bulk kind=process received=%d accepted=%d rejected=%d new=%d existing=%d dur_ms=%.1f",
+        len(events),
+        accepted,
+        rejected,
+        new_count,
+        existing_count,
+        (time.perf_counter() - start_perf) * 1000,
+    )
 
     return JSONResponse(
         {
@@ -1411,9 +1434,20 @@ async def enrich_network(event: NetworkEvent):
     now = datetime.datetime.utcnow().isoformat()
 
     if rep:
+        now_epoch = time.time()
         await r.hincrby(key, "count_total", 1)
-        await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-        await sync_ip_indexes(ip_norm)
+        await r.hset(
+            key,
+            mapping={
+                "last_seen": now,
+                "computer_last": event.Computer,
+            },
+        )
+
+        if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
+            await sync_ip_indexes(ip_norm)
+            await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
         return {
             "destination_ip": ip_norm,
             "status": rep.get("status"),
@@ -1436,6 +1470,7 @@ async def enrich_network(event: NetworkEvent):
             "computer_last": event.Computer,
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
+            "index_last_sync": str(time.time()),
         },
     )
     await r.sadd(STAGED_SET_IP, ip_norm)
@@ -1495,7 +1530,10 @@ async def enrich_network_bulk(request: Request):
     accepted = 0
     rejected = 0
     errors = []
-    vendors = await load_vendors(r)
+    start_perf = time.perf_counter()
+    new_count = 0
+    existing_count = 0
+    index_sync_count = 0
 
     for idx, obj in enumerate(events):
         try:
@@ -1517,10 +1555,18 @@ async def enrich_network_bulk(request: Request):
         now = datetime.datetime.utcnow().isoformat()
 
         if rep:
+            existing_count += 1
+            now_epoch = time.time()
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-            await sync_ip_indexes(ip_norm)
+
+            if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
+                index_sync_count += 1
+                await sync_ip_indexes(ip_norm)
+                await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
         else:
+            new_count += 1
+            index_sync_count += 1
             await r.hset(
                 key,
                 mapping={
@@ -1534,6 +1580,7 @@ async def enrich_network_bulk(request: Request):
                     "computer_last": event.Computer,
                     "count_total": "1",
                     "uuid": str(uuid.uuid4()),
+                    "index_last_sync": str(time.time()),
                 },
             )
             await r.sadd(STAGED_SET_IP, ip_norm)
@@ -1541,6 +1588,17 @@ async def enrich_network_bulk(request: Request):
             await sync_ip_indexes(ip_norm)
 
         accepted += 1
+
+    logger.warning(
+        "bulk kind=network received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        len(events),
+        accepted,
+        rejected,
+        new_count,
+        existing_count,
+        index_sync_count,
+        (time.perf_counter() - start_perf) * 1000,
+    )
 
     return JSONResponse(
         {
@@ -1567,9 +1625,20 @@ async def enrich_dns(event: DnsEvent):
     now = datetime.datetime.utcnow().isoformat()
 
     if rep:
+        now_epoch = time.time()
         await r.hincrby(key, "count_total", 1)
-        await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-        await sync_domain_indexes(domain_norm)
+        await r.hset(
+            key,
+            mapping={
+                "last_seen": now,
+                "computer_last": event.Computer,
+            },
+        )
+
+        if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
+            await sync_domain_indexes(domain_norm)
+            await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
         return {
             "query_name": domain_norm,
             "status": rep.get("status"),
@@ -1591,6 +1660,7 @@ async def enrich_dns(event: DnsEvent):
             "computer_last": event.Computer,
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
+            "index_last_sync": str(time.time()),
         },
     )
     await r.sadd(STAGED_SET_DOMAIN, domain_norm)
@@ -1650,7 +1720,10 @@ async def enrich_dns_bulk(request: Request):
     accepted = 0
     rejected = 0
     errors = []
-    vendors = await load_vendors(r)
+    start_perf = time.perf_counter()
+    new_count = 0
+    existing_count = 0
+    index_sync_count = 0
     
     for idx, obj in enumerate(events):
         try:
@@ -1671,10 +1744,18 @@ async def enrich_dns_bulk(request: Request):
         now = datetime.datetime.utcnow().isoformat()
 
         if rep:
+            existing_count += 1
+            now_epoch = time.time()
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-            await sync_domain_indexes(domain_norm)
+
+            if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
+                index_sync_count += 1
+                await sync_domain_indexes(domain_norm)
+                await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
         else:
+            new_count += 1
+            index_sync_count += 1
             await r.hset(
                 key,
                 mapping={
@@ -1688,6 +1769,7 @@ async def enrich_dns_bulk(request: Request):
                     "computer_last": event.Computer,
                     "count_total": "1",
                     "uuid": str(uuid.uuid4()),
+                    "index_last_sync": str(time.time()),
                 },
             )
             await r.sadd(STAGED_SET_DOMAIN, domain_norm)
@@ -1695,6 +1777,17 @@ async def enrich_dns_bulk(request: Request):
             await sync_domain_indexes(domain_norm)
 
         accepted += 1
+
+    logger.warning(
+        "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        len(events),
+        accepted,
+        rejected,
+        new_count,
+        existing_count,
+        index_sync_count,
+        (time.perf_counter() - start_perf) * 1000,
+    )
 
     return JSONResponse(
         {
