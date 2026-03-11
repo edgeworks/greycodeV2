@@ -91,6 +91,7 @@ KNOWN_IPS_SET = "greycode:known:ips"
 KNOWN_DOMAINS_SET = "greycode:known:domains"
 INDEX_DIRTY_IP_SET = "greycode:index_dirty:ip"
 INDEX_DIRTY_DOMAIN_SET = "greycode:index_dirty:domain"
+INDEX_DIRTY_SHA256_SET = "greycode:index_dirty:sha256"
 
 
 #DEBUG RELATED ------
@@ -1206,22 +1207,32 @@ async def ui_profile_password(
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):
     key = f"greycode:sha256:{event.sha256}"
-    rep = await r.hgetall(key)
     now = datetime.datetime.utcnow().isoformat()
 
-    if rep:
-        await r.hincrby(key, "count_total", 1)
-        await r.hset(key, mapping={"last_seen": now})
-        await sync_sha256_indexes(r, event.sha256)
+    vals = await r.hmget(key, "status", "source", "computer", "image")
+    exists = any(v is not None for v in vals)
+
+    if exists:
+        status, source, computer, image = vals
+
+        pipe = r.pipeline()
+        pipe.hincrby(key, "count_total", 1)
+        pipe.hset(key, mapping={"last_seen": now})
+        pipe.sadd(INDEX_DIRTY_SHA256_SET, event.sha256)
+        await pipe.execute()
+
         return {
             "sha256": event.sha256,
-            "status": rep.get("status"),
-            "source": rep.get("source"),
-            "computer": rep.get("computer"),
-            "image": rep.get("image"),
+            "status": status or "GREY",
+            "source": source or "",
+            "computer": computer or "",
+            "image": image or "",
         }
 
-    await r.hset(
+    vt_enabled = await vt_enabled_setting()
+
+    pipe = r.pipeline()
+    pipe.hset(
         key,
         mapping={
             "status": "GREY",
@@ -1235,11 +1246,13 @@ async def enrich_process(event: ProcessEvent):
             "uuid": str(uuid.uuid4()),
         },
     )
-    await r.sadd(KNOWN_SHA256_SET, event.sha256)
-    await sync_sha256_indexes(r, event.sha256)
+    pipe.sadd(KNOWN_SHA256_SET, event.sha256)
+    pipe.sadd(INDEX_DIRTY_SHA256_SET, event.sha256)
 
-    if await vt_enabled_setting():
-        await r.lpush(VT_QUEUE, event.sha256)
+    if vt_enabled:
+        pipe.lpush(VT_QUEUE, event.sha256)
+
+    await pipe.execute()
 
     return {
         "sha256": event.sha256,
@@ -1266,7 +1279,6 @@ async def enrich_process_bulk(request: Request):
 
     events = []
 
-    # NDJSON: one JSON object per line
     if "application/x-ndjson" in ctype:
         for line in body_text.splitlines():
             line = line.strip()
@@ -1276,9 +1288,7 @@ async def enrich_process_bulk(request: Request):
                 events.append(json.loads(line))
             except json.JSONDecodeError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid NDJSON line: {e}")
-
     else:
-        # application/json: could be object or array
         try:
             parsed = json.loads(body_text)
         except json.JSONDecodeError as e:
@@ -1297,29 +1307,93 @@ async def enrich_process_bulk(request: Request):
     start_perf = time.perf_counter()
     new_count = 0
     existing_count = 0
+    index_sync_count = 0
 
     vt_enabled = await vt_enabled_setting()
 
+    # Aggregate by sha256
+    aggregated: dict[str, dict[str, Any]] = {}
+
     for idx, obj in enumerate(events):
         try:
-            event = ProcessEvent.model_validate(obj)  # Pydantic v2
+            event = ProcessEvent.model_validate(obj)
         except ValidationError as e:
             rejected += 1
             errors.append({"index": idx, "error": e.errors()})
             continue
 
-        # Reuse the same logic as /enrich/process
-        key = f"greycode:sha256:{event.sha256}"
-        rep = await r.hgetall(key)
-        now = datetime.datetime.utcnow().isoformat()
-        if rep:
-            existing_count += 1
-            await r.hincrby(key, "count_total", 1)
-            await r.hset(key, mapping={"last_seen": now})
-            await sync_sha256_indexes(r, event.sha256)
+        accepted += 1
+
+        row = aggregated.get(event.sha256)
+        if row is None:
+            aggregated[event.sha256] = {
+                "count": 1,
+                "computer": event.computer,
+                "image": event.image,
+            }
         else:
-            new_count += 1
-            await r.hset(
+            row["count"] += 1
+            row["computer"] = event.computer
+            row["image"] = event.image
+
+    if not aggregated:
+        logger.warning(
+            "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+            len(events),
+            accepted,
+            rejected,
+            0,
+            new_count,
+            existing_count,
+            index_sync_count,
+            (time.perf_counter() - start_perf) * 1000,
+        )
+        return JSONResponse(
+            {
+                "received": len(events),
+                "accepted": accepted,
+                "rejected": rejected,
+                "errors": errors[:20],
+            }
+        )
+
+    now = datetime.datetime.utcnow().isoformat()
+    hashes = list(aggregated.keys())
+
+    # Fetch only what we need, once per unique sha256
+    pipe = r.pipeline()
+    for sha256_value in hashes:
+        key = f"greycode:sha256:{sha256_value}"
+        pipe.exists(key)
+    exists_raw = await pipe.execute()
+
+    exists_by_hash = {
+        sha256_value: bool(exists_raw[idx])
+        for idx, sha256_value in enumerate(hashes)
+    }
+
+    pipe = r.pipeline()
+
+    for sha256_value in hashes:
+        key = f"greycode:sha256:{sha256_value}"
+        agg = aggregated[sha256_value]
+        count = int(agg["count"])
+        computer = agg["computer"]
+        image = agg["image"]
+
+        if exists_by_hash[sha256_value]:
+            existing_count += count
+            index_sync_count += 1
+
+            pipe.hincrby(key, "count_total", count)
+            pipe.hset(key, mapping={"last_seen": now})
+            pipe.sadd(INDEX_DIRTY_SHA256_SET, sha256_value)
+
+        else:
+            new_count += count
+            index_sync_count += 1
+
+            pipe.hset(
                 key,
                 mapping={
                     "status": "GREY",
@@ -1327,27 +1401,29 @@ async def enrich_process_bulk(request: Request):
                     "source": "pending",
                     "first_seen": now,
                     "last_seen": now,
-                    "computer": event.computer,
-                    "image": event.image,
-                    "count_total": "1",
+                    "computer": computer,
+                    "image": image,
+                    "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
                 },
             )
-            await r.sadd(KNOWN_SHA256_SET, event.sha256)
-            await sync_sha256_indexes(r, event.sha256)
+            pipe.sadd(KNOWN_SHA256_SET, sha256_value)
+            pipe.sadd(INDEX_DIRTY_SHA256_SET, sha256_value)
 
-        if vt_enabled and not rep:
-            await r.lpush(VT_QUEUE, event.sha256)
+            if vt_enabled:
+                pipe.lpush(VT_QUEUE, sha256_value)
 
-        accepted += 1
+    await pipe.execute()
 
     logger.warning(
-        "bulk kind=process received=%d accepted=%d rejected=%d new=%d existing=%d dur_ms=%.1f",
+        "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
+        len(hashes),
         new_count,
         existing_count,
+        index_sync_count,
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -1356,7 +1432,7 @@ async def enrich_process_bulk(request: Request):
             "received": len(events),
             "accepted": accepted,
             "rejected": rejected,
-            "errors": errors[:20],  # cap error list for safety
+            "errors": errors[:20],
         }
     )
 
