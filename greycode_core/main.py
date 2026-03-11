@@ -58,6 +58,11 @@ from indexes import (
     update_listing_indexes,
     remove_from_all_indexes,
 )
+from index_sync import (
+    sync_sha256_indexes,
+    sync_ip_indexes,
+    sync_domain_indexes,
+)
 
 import faulthandler
 import signal
@@ -387,71 +392,6 @@ def known_set_for_kind(kind: str) -> str:
     if kind == "domain":
         return KNOWN_DOMAINS_SET
     raise ValueError(f"Unknown kind: {kind}")
-
-
-async def sync_sha256_indexes(sha256_value: str) -> None:
-    key = f"greycode:sha256:{sha256_value}"
-    data = await r.hgetall(key)
-
-    if not data:
-        await remove_from_all_indexes(r, kind="sha256", indicator=sha256_value)
-        await r.srem(KNOWN_SHA256_SET, sha256_value)
-        return
-
-    await r.sadd(KNOWN_SHA256_SET, sha256_value)
-
-    await update_sha256_indexes(
-        r,
-        sha256=sha256_value,
-        status=(data.get("status") or "GREY").upper(),
-        count_total=int(data.get("count_total") or 0),
-        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
-        disposition=(data.get("disposition") or "").upper(),
-    )
-
-
-async def sync_ip_indexes(ip_value: str) -> None:
-    key = f"greycode:ip:{ip_value}"
-    data = await r.hgetall(key)
-
-    if not data:
-        await remove_from_all_indexes(r, kind="ip", indicator=ip_value)
-        await r.srem(KNOWN_IPS_SET, ip_value)
-        return
-
-    await r.sadd(KNOWN_IPS_SET, ip_value)
-
-    await update_listing_indexes(
-        r,
-        kind="ip",
-        indicator=ip_value,
-        status=(data.get("status") or "GREY").upper(),
-        count_total=int(data.get("count_total") or 0),
-        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
-        listing_state=(data.get("listing_state") or "").upper(),
-    )
-
-
-async def sync_domain_indexes(domain_value: str) -> None:
-    key = f"greycode:domain:{domain_value}"
-    data = await r.hgetall(key)
-
-    if not data:
-        await remove_from_all_indexes(r, kind="domain", indicator=domain_value)
-        await r.srem(KNOWN_DOMAINS_SET, domain_value)
-        return
-
-    await r.sadd(KNOWN_DOMAINS_SET, domain_value)
-
-    await update_listing_indexes(
-        r,
-        kind="domain",
-        indicator=domain_value,
-        status=(data.get("status") or "GREY").upper(),
-        count_total=int(data.get("count_total") or 0),
-        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
-        listing_state=(data.get("listing_state") or "").upper(),
-    )
 
 def should_refresh_index(last_sync_ts: Optional[str], now_ts: float, min_interval_sec: int = 30) -> bool:
     if not last_sync_ts:
@@ -1272,7 +1212,7 @@ async def enrich_process(event: ProcessEvent):
     if rep:
         await r.hincrby(key, "count_total", 1)
         await r.hset(key, mapping={"last_seen": now})
-        await sync_sha256_indexes(event.sha256)
+        await sync_sha256_indexes(r, event.sha256)
         return {
             "sha256": event.sha256,
             "status": rep.get("status"),
@@ -1296,7 +1236,7 @@ async def enrich_process(event: ProcessEvent):
         },
     )
     await r.sadd(KNOWN_SHA256_SET, event.sha256)
-    await sync_sha256_indexes(event.sha256)
+    await sync_sha256_indexes(r, event.sha256)
 
     if await vt_enabled_setting():
         await r.lpush(VT_QUEUE, event.sha256)
@@ -1376,7 +1316,7 @@ async def enrich_process_bulk(request: Request):
             existing_count += 1
             await r.hincrby(key, "count_total", 1)
             await r.hset(key, mapping={"last_seen": now})
-            await sync_sha256_indexes(event.sha256)
+            await sync_sha256_indexes(r, event.sha256)
         else:
             new_count += 1
             await r.hset(
@@ -1394,7 +1334,7 @@ async def enrich_process_bulk(request: Request):
                 },
             )
             await r.sadd(KNOWN_SHA256_SET, event.sha256)
-            await sync_sha256_indexes(event.sha256)
+            await sync_sha256_indexes(r, event.sha256)
 
         if vt_enabled and not rep:
             await r.lpush(VT_QUEUE, event.sha256)
@@ -1448,7 +1388,7 @@ async def enrich_network(event: NetworkEvent):
         )
 
         if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-            await sync_ip_indexes(ip_norm)
+            await sync_ip_indexes(r, ip_norm)
             await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
 
         return {
@@ -1478,7 +1418,7 @@ async def enrich_network(event: NetworkEvent):
     )
     await r.sadd(STAGED_SET_IP, ip_norm)
     await r.sadd("greycode:known:ips", ip_norm)
-    await sync_ip_indexes(ip_norm)
+    await sync_ip_indexes(r, ip_norm)
 
     return {
         "destination_ip": ip_norm,
@@ -1719,7 +1659,7 @@ async def enrich_dns(event: DnsEvent):
         )
 
         if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-            await sync_domain_indexes(domain_norm)
+            await sync_domain_indexes(r, domain_norm)
             await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
 
         return {
@@ -1748,7 +1688,7 @@ async def enrich_dns(event: DnsEvent):
     )
     await r.sadd(STAGED_SET_DOMAIN, domain_norm)
     await r.sadd("greycode:known:domains", domain_norm)
-    await sync_domain_indexes(domain_norm)
+    await sync_domain_indexes(r, domain_norm)
 
     return {
         "query_name": domain_norm,
