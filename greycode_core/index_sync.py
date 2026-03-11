@@ -3,11 +3,19 @@ from typing import Optional
 
 import redis.asyncio as redis
 
-from indexes import (
-    update_sha256_indexes,
-    update_listing_indexes,
-    remove_from_all_indexes,
-)
+try:
+    from indexes import (
+        update_sha256_indexes,
+        update_listing_indexes,
+        remove_from_all_indexes,
+    )
+except ModuleNotFoundError:
+    from greycode_core.indexes import (
+        update_sha256_indexes,
+        update_listing_indexes,
+        remove_from_all_indexes,
+    ) 
+
 
 KNOWN_SHA256_SET = "greycode:known:sha256"
 KNOWN_IPS_SET = "greycode:known:ips"
