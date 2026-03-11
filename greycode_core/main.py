@@ -66,13 +66,6 @@ import logging
 faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
 logger = logging.getLogger("greycode.debug")
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start = time.perf_counter()
-    response = await call_next(request)
-    dur = (time.perf_counter() - start) * 1000
-    logger.warning("path=%s status=%s dur_ms=%.1f", request.url.path, response.status_code, dur)
-    return response
 #-------------------
 
 app = FastAPI(title="Greycode API")
@@ -91,6 +84,18 @@ CFG_KEY = "greycode:cfg"
 KNOWN_SHA256_SET = "greycode:known:sha256"
 KNOWN_IPS_SET = "greycode:known:ips"
 KNOWN_DOMAINS_SET = "greycode:known:domains"
+
+#DEBUG RELATED ------
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    dur = (time.perf_counter() - start) * 1000
+    logger.warning("path=%s status=%s dur_ms=%.1f", request.url.path, response.status_code, dur)
+    return response
+#-------------------
+
 
 
 if not os.getenv("GREYCODE_SESSION_SECRET"):
