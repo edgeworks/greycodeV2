@@ -83,14 +83,20 @@ async def main():
 
     try:
         while not stop_event.is_set():
-            total = 0
+            ip_done = await drain_dirty_set(r, INDEX_DIRTY_IP_SET, "ip", BATCH_SIZE)
+            domain_done = await drain_dirty_set(r, INDEX_DIRTY_DOMAIN_SET, "domain", BATCH_SIZE)
+            sha_done = await drain_dirty_set(r, INDEX_DIRTY_SHA256_SET, "sha256", BATCH_SIZE)
 
-            total += await drain_dirty_set(r, INDEX_DIRTY_IP_SET, "ip", BATCH_SIZE)
-            total += await drain_dirty_set(r, INDEX_DIRTY_DOMAIN_SET, "domain", BATCH_SIZE)
-            total += await drain_dirty_set(r, INDEX_DIRTY_SHA256_SET, "sha256", BATCH_SIZE)
+            total = ip_done + domain_done + sha_done
 
             if total > 0:
-                logger.warning("dirty-index-worker processed=%d", total)
+                logger.warning(
+                    "dirty-index-worker processed total=%d ip=%d domain=%d sha256=%d",
+                    total,
+                    ip_done,
+                    domain_done,
+                    sha_done,
+                )
                 await asyncio.sleep(BUSY_SLEEP_SEC)
             else:
                 await asyncio.sleep(IDLE_SLEEP_SEC)
