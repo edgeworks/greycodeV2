@@ -58,6 +58,23 @@ from indexes import (
     remove_from_all_indexes,
 )
 
+#DEBUG RELATED ------
+import faulthandler
+import signal
+import sys
+import logging
+faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
+logger = logging.getLogger("greycode.debug")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    dur = (time.perf_counter() - start) * 1000
+    logger.warning("path=%s status=%s dur_ms=%.1f", request.url.path, response.status_code, dur)
+    return response
+#-------------------
+
 app = FastAPI(title="Greycode API")
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
