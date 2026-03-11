@@ -188,7 +188,7 @@ async def update_cycle(run_reason: str) -> None:
     await save_vendors(r, new_vendors)
     vendors = new_vendors
 
-    await recheck_all_indicators(vendors, batch=batch)
+    #await recheck_all_indicators(vendors, batch=batch)
 
 
 async def worker_loop() -> None:

@@ -375,36 +375,29 @@ def parse_threatfox_domains_json(text: str) -> List[str]:
     payload = _json_loads(text or "{}", {})
     rows: List[dict] = []
 
-    print(f"[parser:threatfox_domains] payload_type={type(payload).__name__}")
-
     if isinstance(payload, list):
         for item in payload:
             if isinstance(item, dict):
                 rows.append(item)
-        print(f"[parser:threatfox_domains] list_rows={len(rows)}")
 
     elif isinstance(payload, dict):
         if isinstance(payload.get("data"), list):
             for item in payload["data"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_domains] branch=data rows={len(rows)}")
 
         elif isinstance(payload.get("results"), list):
             for item in payload["results"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_domains] branch=results rows={len(rows)}")
 
         elif isinstance(payload.get("ioc_list"), list):
             for item in payload["ioc_list"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_domains] branch=ioc_list rows={len(rows)}")
 
         else:
             top_keys = list(payload.keys())[:5]
-            print(f"[parser:threatfox_domains] branch=dict_values top_keys={top_keys}")
             for value in payload.values():
                 if isinstance(value, list):
                     for item in value:
@@ -412,11 +405,6 @@ def parse_threatfox_domains_json(text: str) -> List[str]:
                             rows.append(item)
                 elif isinstance(value, dict):
                     rows.append(value)
-            print(f"[parser:threatfox_domains] branch=dict_values rows={len(rows)}")
-
-    if rows:
-        print(f"[parser:threatfox_domains] first_row_keys={list(rows[0].keys())[:10]}")
-        print(f"[parser:threatfox_domains] first_row={rows[0]}")
 
     out: List[str] = []
     for row in rows:
@@ -434,7 +422,6 @@ def parse_threatfox_domains_json(text: str) -> List[str]:
                 break
 
     out = sorted(set(out))
-    print(f"[parser:threatfox_domains] extracted={len(out)} sample={out[:5]}")
     return out
 
 
@@ -442,36 +429,29 @@ def parse_threatfox_ip_port_json(text: str) -> List[str]:
     payload = _json_loads(text or "{}", {})
     rows: List[dict] = []
 
-    print(f"[parser:threatfox_ipport] payload_type={type(payload).__name__}")
-
     if isinstance(payload, list):
         for item in payload:
             if isinstance(item, dict):
                 rows.append(item)
-        print(f"[parser:threatfox_ipport] list_rows={len(rows)}")
 
     elif isinstance(payload, dict):
         if isinstance(payload.get("data"), list):
             for item in payload["data"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_ipport] branch=data rows={len(rows)}")
 
         elif isinstance(payload.get("results"), list):
             for item in payload["results"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_ipport] branch=results rows={len(rows)}")
 
         elif isinstance(payload.get("ioc_list"), list):
             for item in payload["ioc_list"]:
                 if isinstance(item, dict):
                     rows.append(item)
-            print(f"[parser:threatfox_ipport] branch=ioc_list rows={len(rows)}")
 
         else:
             top_keys = list(payload.keys())[:5]
-            print(f"[parser:threatfox_ipport] branch=dict_values top_keys={top_keys}")
             for value in payload.values():
                 if isinstance(value, list):
                     for item in value:
@@ -479,11 +459,6 @@ def parse_threatfox_ip_port_json(text: str) -> List[str]:
                             rows.append(item)
                 elif isinstance(value, dict):
                     rows.append(value)
-            print(f"[parser:threatfox_ipport] branch=dict_values rows={len(rows)}")
-
-    if rows:
-        print(f"[parser:threatfox_ipport] first_row_keys={list(rows[0].keys())[:10]}")
-        print(f"[parser:threatfox_ipport] first_row={rows[0]}")
 
     out: List[str] = []
     for row in rows:
@@ -508,7 +483,6 @@ def parse_threatfox_ip_port_json(text: str) -> List[str]:
                 continue
 
     out = sorted(set(out))
-    print(f"[parser:threatfox_ipport] extracted={len(out)} sample={out[:5]}")
     return out
 
 
