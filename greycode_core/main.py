@@ -1373,13 +1373,19 @@ async def enrich_network(event: NetworkEvent):
         raise HTTPException(status_code=400, detail="Invalid DestinationIp")
 
     key = f"greycode:ip:{ip_norm}"
-    rep = await r.hgetall(key)
     now = datetime.datetime.utcnow().isoformat()
+    now_epoch = time.time()
 
-    if rep:
-        now_epoch = time.time()
-        await r.hincrby(key, "count_total", 1)
-        await r.hset(
+    # Fetch only what we need
+    vals = await r.hmget(key, "status", "listing_state", "source", "index_last_sync")
+    exists = any(v is not None for v in vals)
+
+    if exists:
+        status, listing_state, source, index_last_sync = vals
+
+        pipe = r.pipeline()
+        pipe.hincrby(key, "count_total", 1)
+        pipe.hset(
             key,
             mapping={
                 "last_seen": now,
@@ -1387,20 +1393,22 @@ async def enrich_network(event: NetworkEvent):
             },
         )
 
-        if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-            await sync_ip_indexes(r, ip_norm)
-            await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        if should_refresh_index(index_last_sync, now_epoch, min_interval_sec=30):
+            pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
+            pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
+        await pipe.execute()
 
         return {
             "destination_ip": ip_norm,
-            "status": rep.get("status"),
-            "listing_state": rep.get("listing_state"),
-            "source": rep.get("source"),
+            "status": status or "GREY",
+            "listing_state": listing_state or "",
+            "source": source or "",
             "computer_last": event.Computer,
         }
 
-    # New record: GREY + PENDING, stage for later blacklist checking
-    await r.hset(
+    pipe = r.pipeline()
+    pipe.hset(
         key,
         mapping={
             "type": "ip",
@@ -1413,12 +1421,13 @@ async def enrich_network(event: NetworkEvent):
             "computer_last": event.Computer,
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
-            "index_last_sync": str(time.time()),
+            "index_last_sync": str(now_epoch),
         },
     )
-    await r.sadd(STAGED_SET_IP, ip_norm)
-    await r.sadd("greycode:known:ips", ip_norm)
-    await sync_ip_indexes(r, ip_norm)
+    pipe.sadd(STAGED_SET_IP, ip_norm)
+    pipe.sadd(KNOWN_IPS_SET, ip_norm)
+    pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
+    await pipe.execute()
 
     return {
         "destination_ip": ip_norm,
@@ -1644,13 +1653,18 @@ async def enrich_dns(event: DnsEvent):
         raise HTTPException(status_code=400, detail="Invalid QueryName")
 
     key = f"greycode:domain:{domain_norm}"
-    rep = await r.hgetall(key)
     now = datetime.datetime.utcnow().isoformat()
+    now_epoch = time.time()
 
-    if rep:
-        now_epoch = time.time()
-        await r.hincrby(key, "count_total", 1)
-        await r.hset(
+    vals = await r.hmget(key, "status", "listing_state", "source", "index_last_sync")
+    exists = any(v is not None for v in vals)
+
+    if exists:
+        status, listing_state, source, index_last_sync = vals
+
+        pipe = r.pipeline()
+        pipe.hincrby(key, "count_total", 1)
+        pipe.hset(
             key,
             mapping={
                 "last_seen": now,
@@ -1658,19 +1672,22 @@ async def enrich_dns(event: DnsEvent):
             },
         )
 
-        if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-            await sync_domain_indexes(r, domain_norm)
-            await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        if should_refresh_index(index_last_sync, now_epoch, min_interval_sec=30):
+            pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
+            pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
+        await pipe.execute()
 
         return {
             "query_name": domain_norm,
-            "status": rep.get("status"),
-            "listing_state": rep.get("listing_state"),
-            "source": rep.get("source"),
+            "status": status or "GREY",
+            "listing_state": listing_state or "",
+            "source": source or "",
             "computer_last": event.Computer,
         }
 
-    await r.hset(
+    pipe = r.pipeline()
+    pipe.hset(
         key,
         mapping={
             "type": "domain",
@@ -1683,12 +1700,13 @@ async def enrich_dns(event: DnsEvent):
             "computer_last": event.Computer,
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
-            "index_last_sync": str(time.time()),
+            "index_last_sync": str(now_epoch),
         },
     )
-    await r.sadd(STAGED_SET_DOMAIN, domain_norm)
-    await r.sadd("greycode:known:domains", domain_norm)
-    await sync_domain_indexes(r, domain_norm)
+    pipe.sadd(STAGED_SET_DOMAIN, domain_norm)
+    pipe.sadd(KNOWN_DOMAINS_SET, domain_norm)
+    pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
+    await pipe.execute()
 
     return {
         "query_name": domain_norm,
