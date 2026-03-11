@@ -1344,6 +1344,8 @@ async def enrich_process_bulk(request: Request):
     rejected = 0
     errors = []
 
+    vt_enabled = await vt_enabled_setting()
+
     for idx, obj in enumerate(events):
         try:
             event = ProcessEvent.model_validate(obj)  # Pydantic v2
@@ -1378,7 +1380,7 @@ async def enrich_process_bulk(request: Request):
             await r.sadd(KNOWN_SHA256_SET, event.sha256)
             await sync_sha256_indexes(event.sha256)
 
-        if await vt_enabled_setting() and not rep:
+        if vt_enabled and not rep:
             await r.lpush(VT_QUEUE, event.sha256)
 
         accepted += 1
