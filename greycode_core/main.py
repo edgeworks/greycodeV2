@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import Query
 from fastapi import Form
 from pathlib import Path
+import math
 from pydantic import BaseModel, ValidationError
 from starlette.middleware.sessions import SessionMiddleware
 from urllib.parse import quote
@@ -303,10 +304,6 @@ async def save_settings(mapping: dict[str, str]) -> None:
     if clean:
         await r.hset(CFG_KEY, mapping=clean)
 
-
-async def save_vendors(vendors: list[dict[str, Any]]) -> None:
-    await r.set(VENDORS_KEY, json.dumps(vendors, ensure_ascii=False))
-
 class ProcessEvent(BaseModel):
     # Sysmon ID 1 fields (Cribl passes sha256, Computer, Image)
     sha256: str
@@ -560,38 +557,49 @@ async def fetch_indexed_page(
     filter_keys = filter_set_keys_for(kind, status, triage, listing_state)
 
     page_start = (page - 1) * page_size
-    page_end = page_start + page_size
-
-    # exact total for no-search case; search case scans the relevant index
     total = 0 if q_lower else await exact_count_for_filters(kind, filter_keys)
 
     rows: list[dict[str, Any]] = []
     matched = 0
-    offset = 0
     chunk = max(500, page_size * 5)
 
-    while True:
+    # Bound the iteration count to the size of the sorted index
+    zcard = int(await r.zcard(base_z))
+    if zcard <= 0:
+        return [], 0
+
+    num_chunks = math.ceil(zcard / chunk)
+
+    for chunk_idx in range(num_chunks):
+        start = chunk_idx * chunk
+        end = start + chunk - 1
+
         if reverse:
-            members = await r.zrevrange(base_z, offset, offset + chunk - 1)
+            members = await r.zrevrange(base_z, start, end)
         else:
-            members = await r.zrange(base_z, offset, offset + chunk - 1)
+            members = await r.zrange(base_z, start, end)
 
         if not members:
             break
 
-        offset += len(members)
-
         if q_lower:
             pipe = r.pipeline()
             for m in members:
+                for fk in filter_keys:
+                    pipe.sismember(fk, m)
                 pipe.hgetall(record_key_for_kind(kind, m))
-            data_list = await pipe.execute()
+            raw = await pipe.execute()
 
-            for m, data in zip(members, data_list):
-                if not await member_matches_filter_sets(m, filter_keys):
+            width = len(filter_keys) + 1
+            for i, m in enumerate(members):
+                base = i * width
+                membership_results = raw[base:base + len(filter_keys)]
+                data = raw[base + len(filter_keys)] or {}
+
+                if filter_keys and not all(bool(x) for x in membership_results):
                     continue
 
-                row = build_row_from_data(tab, kind, indicator_field, m, data or {})
+                row = build_row_from_data(tab, kind, indicator_field, m, data)
                 if not row_matches_q(tab, row, q_lower):
                     continue
 
@@ -599,131 +607,55 @@ async def fetch_indexed_page(
                 if total > page_start and len(rows) < page_size:
                     rows.append(row)
 
-            continue
-
-        # no q: can stop early once page filled because total already exact
-        for m in members:
-            if not await member_matches_filter_sets(m, filter_keys):
+            if len(rows) >= page_size and total > page_start:
+                # keep scanning for exact total only when searching
                 continue
 
-            matched += 1
-            if matched <= page_start:
+        else:
+            pipe = r.pipeline()
+            members_kept: list[str] = []
+
+            for m in members:
+                include = True
+                if filter_keys:
+                    for fk in filter_keys:
+                        pipe.sismember(fk, m)
+
+            membership_raw = await pipe.execute() if filter_keys else []
+
+            if filter_keys:
+                idx = 0
+                for m in members:
+                    member_ok = True
+                    for _ in filter_keys:
+                        if not membership_raw[idx]:
+                            member_ok = False
+                        idx += 1
+                    if member_ok:
+                        members_kept.append(m)
+            else:
+                members_kept = members
+
+            if not members_kept:
                 continue
 
-            data = await r.hgetall(record_key_for_kind(kind, m))
-            rows.append(build_row_from_data(tab, kind, indicator_field, m, data or {}))
+            need_members = members_kept[max(0, page_start - matched): max(0, page_start - matched) + (page_size - len(rows))]
+            matched += len(members_kept)
+
+            if need_members:
+                pipe = r.pipeline()
+                for m in need_members:
+                    pipe.hgetall(record_key_for_kind(kind, m))
+                data_list = await pipe.execute()
+
+                for m, data in zip(need_members, data_list):
+                    rows.append(build_row_from_data(tab, kind, indicator_field, m, data or {}))
 
             if len(rows) >= page_size:
                 return rows, total
 
     return rows, total
 
-
-async def legacy_ui_sysmon_table(
-    request: Request,
-    *,
-    tab: int,
-    indicator_label: str,
-    indicator_field: str,
-    kind: str,
-    pattern: str,
-    status: str,
-    q: str,
-    sort: str,
-    order: str,
-    page: int,
-    page_size: int,
-    triage: str,
-    listing_state: str,
-):
-    q_lower = (q or "").strip().lower()
-
-    rows = []
-    cursor = 0
-
-    while True:
-        cursor, keys = await r.scan(cursor=cursor, match=pattern, count=500)
-        for key in keys:
-            data = await r.hgetall(key)
-            indicator = key.split(":", 2)[-1]
-
-            row = build_row_from_data(tab, kind, indicator_field, indicator, data or {})
-
-            if status != "ALL" and row["status"] != status:
-                continue
-
-            if tab == 1:
-                tri = (triage or "ALL").upper()
-                if tri == "OPEN":
-                    if not (row["status"] == "RED" and row["disposition"] == ""):
-                        continue
-                elif tri == "TRIAGED":
-                    if row["disposition"] == "":
-                        continue
-
-            if tab in (3, 22):
-                ls = (listing_state or "ALL").upper()
-                if ls != "ALL" and row["listing_state"] != ls:
-                    continue
-
-            if not row_matches_q(tab, row, q_lower):
-                continue
-
-            rows.append(row)
-
-        if cursor == 0:
-            break
-
-    reverse = (order.lower() != "asc")
-
-    if sort == "count_total":
-        rows.sort(key=lambda x: x["count_total"], reverse=reverse)
-    elif sort == "status":
-        rank = {"RED": 0, "ERROR": 1, "GREY": 2, "GREEN": 3}
-        rows.sort(key=lambda x: (rank.get(x["status"], 99), x.get("last_seen") or ""), reverse=False)
-        if reverse:
-            rows.reverse()
-    elif sort == "listing_state":
-        rows.sort(key=lambda x: (x.get("listing_state") or "", x.get("last_seen") or ""), reverse=reverse)
-    elif sort == "vt_state":
-        rows.sort(key=lambda x: (x.get("vt_state") or "", x.get("last_seen") or ""), reverse=reverse)
-    elif sort == "computer":
-        rows.sort(key=lambda x: (x.get("computer") or "").lower(), reverse=reverse)
-    elif sort == "image":
-        rows.sort(key=lambda x: (x.get("image") or "").lower(), reverse=reverse)
-    elif sort == "source":
-        rows.sort(key=lambda x: (x.get("source") or "").lower(), reverse=reverse)
-    elif sort == "computer_last":
-        rows.sort(key=lambda x: (x.get("computer_last") or "").lower(), reverse=reverse)
-    elif sort == "indicator":
-        rows.sort(key=lambda x: (x.get(indicator_field) or "").lower(), reverse=reverse)
-    else:
-        rows.sort(key=lambda x: x.get("last_seen") or "", reverse=reverse)
-
-    total = len(rows)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_rows = rows[start:end]
-
-    return templates.TemplateResponse(
-        "partials/sysmon_table.html",
-        {
-            "request": request,
-            "tab": tab,
-            "rows": page_rows,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "status": status,
-            "triage": triage,
-            "listing_state": listing_state,
-            "q": q,
-            "sort": sort,
-            "order": order,
-            "indicator_label": indicator_label,
-            "indicator_field": indicator_field,
-        },
-    )
 
 async def recheck_vt_stage(sha256: str) -> None:
     """
@@ -1013,7 +945,7 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
         mapping["threatfox_api_key_enc"] = encrypt_secret(threatfox_api_key)
 
     await save_settings(mapping)
-    await save_vendors(new_vendors)
+    await save_vendors(r, [Vendor(**v) for v in new_vendors])
 
     s = await load_settings()
     return templates.TemplateResponse(
@@ -2107,19 +2039,16 @@ async def ui_sysmon_table(
     tab = int(event_id)
 
     if tab == 1:
-        pattern = "greycode:sha256:*"
         indicator_label = "SHA256"
         indicator_field = "sha256"
         kind = "sha256"
         allowed_status = {"ALL", "RED", "ERROR", "GREY", "GREEN"}
     elif tab == 3:
-        pattern = "greycode:ip:*"
         indicator_label = "DestinationIp"
         indicator_field = "ip"
         kind = "ip"
         allowed_status = {"ALL", "RED", "ERROR", "GREY"}
     elif tab == 22:
-        pattern = "greycode:domain:*"
         indicator_label = "QueryName"
         indicator_field = "domain"
         kind = "domain"
@@ -2134,22 +2063,7 @@ async def ui_sysmon_table(
     indexed_sorts = {"last_seen", "count_total", "rare"}
 
     if sort not in indexed_sorts:
-        return await legacy_ui_sysmon_table(
-            request,
-            tab=tab,
-            indicator_label=indicator_label,
-            indicator_field=indicator_field,
-            kind=kind,
-            pattern=pattern,
-            status=status,
-            q=q,
-            sort=sort,
-            order=order,
-            page=page,
-            page_size=page_size,
-            triage=triage,
-            listing_state=listing_state,
-        )
+        sort = "last_seen"
 
     rows, total = await fetch_indexed_page(
         tab=tab,
