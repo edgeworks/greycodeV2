@@ -59,15 +59,14 @@ from indexes import (
     remove_from_all_indexes,
 )
 
-#DEBUG RELATED ------
 import faulthandler
 import signal
 import sys
 import logging
+
 faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
 logger = logging.getLogger("greycode.debug")
 
-#-------------------
 
 app = FastAPI(title="Greycode API")
 BASE_DIR = Path(__file__).resolve().parent
@@ -85,9 +84,11 @@ CFG_KEY = "greycode:cfg"
 KNOWN_SHA256_SET = "greycode:known:sha256"
 KNOWN_IPS_SET = "greycode:known:ips"
 KNOWN_DOMAINS_SET = "greycode:known:domains"
+INDEX_DIRTY_IP_SET = "greycode:index_dirty:ip"
+INDEX_DIRTY_DOMAIN_SET = "greycode:index_dirty:domain"
+
 
 #DEBUG RELATED ------
-
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.perf_counter()
@@ -365,6 +366,8 @@ def iso_to_epoch(ts: Optional[str]) -> float:
     except Exception:
         return time.time()
 
+def utcnow_iso() -> str:
+    return datetime.datetime.utcnow().isoformat()
 
 def record_key_for_kind(kind: str, indicator: str) -> str:
     if kind == "sha256":
@@ -1535,9 +1538,12 @@ async def enrich_network_bulk(request: Request):
     existing_count = 0
     index_sync_count = 0
 
+    # Aggregate by normalized IP
+    aggregated: dict[str, dict[str, Any]] = {}
+
     for idx, obj in enumerate(events):
         try:
-            event = NetworkEvent.model_validate(obj)  # Pydantic v2
+            event = NetworkEvent.model_validate(obj)
         except ValidationError as e:
             rejected += 1
             errors.append({"index": idx, "error": e.errors()})
@@ -1550,24 +1556,100 @@ async def enrich_network_bulk(request: Request):
             errors.append({"index": idx, "error": "Invalid DestinationIp"})
             continue
 
-        key = f"greycode:ip:{ip_norm}"
-        rep = await r.hgetall(key)
-        now = datetime.datetime.utcnow().isoformat()
+        accepted += 1
 
-        if rep:
-            existing_count += 1
-            now_epoch = time.time()
-            await r.hincrby(key, "count_total", 1)
-            await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-
-            if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-                index_sync_count += 1
-                await sync_ip_indexes(ip_norm)
-                await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        row = aggregated.get(ip_norm)
+        if row is None:
+            aggregated[ip_norm] = {
+                "count": 1,
+                "computer_first": event.Computer,
+                "computer_last": event.Computer,
+            }
         else:
-            new_count += 1
+            row["count"] += 1
+            row["computer_last"] = event.Computer
+
+    if not aggregated:
+        logger.warning(
+            "bulk kind=network received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d dur_ms=%.1f",
+            len(events),
+            accepted,
+            rejected,
+            new_count,
+            existing_count,
+            index_sync_count,
+            0,
+            (time.perf_counter() - start_perf) * 1000,
+        )
+        return JSONResponse(
+            {
+                "received": len(events),
+                "accepted": accepted,
+                "rejected": rejected,
+                "errors": errors[:20],
+            }
+        )
+
+    now = utcnow_iso()
+    now_epoch = time.time()
+    ips = list(aggregated.keys())
+
+    # Fetch only what we actually need, once per unique indicator
+    pipe = r.pipeline()
+    for ip_norm in ips:
+        key = f"greycode:ip:{ip_norm}"
+        pipe.exists(key)
+        pipe.hmget(key, "index_last_sync")
+    existence_raw = await pipe.execute()
+
+    meta_by_ip: dict[str, dict[str, Any]] = {}
+    pos = 0
+    for ip_norm in ips:
+        exists_flag = bool(existence_raw[pos])
+        index_last_sync_val = None
+        pos += 1
+
+        hmget_vals = existence_raw[pos]
+        pos += 1
+        if hmget_vals and len(hmget_vals) >= 1:
+            index_last_sync_val = hmget_vals[0]
+
+        meta_by_ip[ip_norm] = {
+            "exists": exists_flag,
+            "index_last_sync": index_last_sync_val,
+        }
+
+    pipe = r.pipeline()
+
+    for ip_norm in ips:
+        key = f"greycode:ip:{ip_norm}"
+        agg = aggregated[ip_norm]
+        meta = meta_by_ip[ip_norm]
+        count = int(agg["count"])
+        computer_first = agg["computer_first"]
+        computer_last = agg["computer_last"]
+
+        if meta["exists"]:
+            existing_count += count
+
+            pipe.hincrby(key, "count_total", count)
+            pipe.hset(
+                key,
+                mapping={
+                    "last_seen": now,
+                    "computer_last": computer_last,
+                },
+            )
+
+            if should_refresh_index(meta.get("index_last_sync"), now_epoch, min_interval_sec=30):
+                index_sync_count += 1
+                pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
+                pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        else:
+            new_count += count
             index_sync_count += 1
-            await r.hset(
+
+            pipe.hset(
                 key,
                 mapping={
                     "type": "ip",
@@ -1576,24 +1658,25 @@ async def enrich_network_bulk(request: Request):
                     "source": "pending",
                     "first_seen": now,
                     "last_seen": now,
-                    "computer_first": event.Computer,
-                    "computer_last": event.Computer,
-                    "count_total": "1",
+                    "computer_first": computer_first,
+                    "computer_last": computer_last,
+                    "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
-                    "index_last_sync": str(time.time()),
+                    "index_last_sync": str(now_epoch),
                 },
             )
-            await r.sadd(STAGED_SET_IP, ip_norm)
-            await r.sadd("greycode:known:ips", ip_norm)
-            await sync_ip_indexes(ip_norm)
+            pipe.sadd(STAGED_SET_IP, ip_norm)
+            pipe.sadd(KNOWN_IPS_SET, ip_norm)
+            pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
 
-        accepted += 1
+    await pipe.execute()
 
     logger.warning(
-        "bulk kind=network received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        "bulk kind=network received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
+        len(ips),
         new_count,
         existing_count,
         index_sync_count,
@@ -1724,10 +1807,13 @@ async def enrich_dns_bulk(request: Request):
     new_count = 0
     existing_count = 0
     index_sync_count = 0
-    
+
+    # Aggregate by normalized domain
+    aggregated: dict[str, dict[str, Any]] = {}
+
     for idx, obj in enumerate(events):
         try:
-            event = DnsEvent.model_validate(obj)  # Pydantic v2
+            event = DnsEvent.model_validate(obj)
         except ValidationError as e:
             rejected += 1
             errors.append({"index": idx, "error": e.errors()})
@@ -1739,24 +1825,100 @@ async def enrich_dns_bulk(request: Request):
             errors.append({"index": idx, "error": "Invalid QueryName"})
             continue
 
-        key = f"greycode:domain:{domain_norm}"
-        rep = await r.hgetall(key)
-        now = datetime.datetime.utcnow().isoformat()
+        accepted += 1
 
-        if rep:
-            existing_count += 1
-            now_epoch = time.time()
-            await r.hincrby(key, "count_total", 1)
-            await r.hset(key, mapping={"last_seen": now, "computer_last": event.Computer})
-
-            if should_refresh_index(rep.get("index_last_sync"), now_epoch, min_interval_sec=30):
-                index_sync_count += 1
-                await sync_domain_indexes(domain_norm)
-                await r.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        row = aggregated.get(domain_norm)
+        if row is None:
+            aggregated[domain_norm] = {
+                "count": 1,
+                "computer_first": event.Computer,
+                "computer_last": event.Computer,
+            }
         else:
-            new_count += 1
+            row["count"] += 1
+            row["computer_last"] = event.Computer
+
+    if not aggregated:
+        logger.warning(
+            "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d dur_ms=%.1f",
+            len(events),
+            accepted,
+            rejected,
+            new_count,
+            existing_count,
+            index_sync_count,
+            0,
+            (time.perf_counter() - start_perf) * 1000,
+        )
+        return JSONResponse(
+            {
+                "received": len(events),
+                "accepted": accepted,
+                "rejected": rejected,
+                "errors": errors[:20],
+            }
+        )
+
+    now = utcnow_iso()
+    now_epoch = time.time()
+    domains = list(aggregated.keys())
+
+    # Fetch only what we need, once per unique indicator
+    pipe = r.pipeline()
+    for domain_norm in domains:
+        key = f"greycode:domain:{domain_norm}"
+        pipe.exists(key)
+        pipe.hmget(key, "index_last_sync")
+    existence_raw = await pipe.execute()
+
+    meta_by_domain: dict[str, dict[str, Any]] = {}
+    pos = 0
+    for domain_norm in domains:
+        exists_flag = bool(existence_raw[pos])
+        pos += 1
+
+        index_last_sync_val = None
+        hmget_vals = existence_raw[pos]
+        pos += 1
+        if hmget_vals and len(hmget_vals) >= 1:
+            index_last_sync_val = hmget_vals[0]
+
+        meta_by_domain[domain_norm] = {
+            "exists": exists_flag,
+            "index_last_sync": index_last_sync_val,
+        }
+
+    pipe = r.pipeline()
+
+    for domain_norm in domains:
+        key = f"greycode:domain:{domain_norm}"
+        agg = aggregated[domain_norm]
+        meta = meta_by_domain[domain_norm]
+        count = int(agg["count"])
+        computer_first = agg["computer_first"]
+        computer_last = agg["computer_last"]
+
+        if meta["exists"]:
+            existing_count += count
+
+            pipe.hincrby(key, "count_total", count)
+            pipe.hset(
+                key,
+                mapping={
+                    "last_seen": now,
+                    "computer_last": computer_last,
+                },
+            )
+
+            if should_refresh_index(meta.get("index_last_sync"), now_epoch, min_interval_sec=30):
+                index_sync_count += 1
+                pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
+                pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+        else:
+            new_count += count
             index_sync_count += 1
-            await r.hset(
+
+            pipe.hset(
                 key,
                 mapping={
                     "type": "domain",
@@ -1765,24 +1927,25 @@ async def enrich_dns_bulk(request: Request):
                     "source": "pending",
                     "first_seen": now,
                     "last_seen": now,
-                    "computer_first": event.Computer,
-                    "computer_last": event.Computer,
-                    "count_total": "1",
+                    "computer_first": computer_first,
+                    "computer_last": computer_last,
+                    "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
-                    "index_last_sync": str(time.time()),
+                    "index_last_sync": str(now_epoch),
                 },
             )
-            await r.sadd(STAGED_SET_DOMAIN, domain_norm)
-            await r.sadd("greycode:known:domains", domain_norm)
-            await sync_domain_indexes(domain_norm)
+            pipe.sadd(STAGED_SET_DOMAIN, domain_norm)
+            pipe.sadd(KNOWN_DOMAINS_SET, domain_norm)
+            pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
 
-        accepted += 1
+    await pipe.execute()
 
     logger.warning(
-        "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        "bulk kind=dns received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
+        len(domains),
         new_count,
         existing_count,
         index_sync_count,
