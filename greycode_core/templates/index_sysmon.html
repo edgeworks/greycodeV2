@@ -41,7 +41,7 @@
     {% else %}
       <label>Listing
         <select name="listing_state">
-          {% for ls in ["ALL","PENDING","NO_LISTING","LISTED"] %}
+          {% for ls in ["ALL","PENDING","NO_LISTING","LISTED","ERROR"] %}
             <option value="{{ ls }}" {% if listing_state == ls %}selected{% endif %}>{{ ls }}</option>
           {% endfor %}
         </select>
@@ -53,21 +53,6 @@
         <option value="last_seen" {% if sort == "last_seen" %}selected{% endif %}>Last seen</option>
         <option value="count_total" {% if sort == "count_total" %}selected{% endif %}>Count</option>
         <option value="rare" {% if sort == "rare" %}selected{% endif %}>Rare</option>
-
-        {# keep legacy sort options available for now #}
-        {% if tab == 1 %}
-          <option value="status" {% if sort == "status" %}selected{% endif %}>Status</option>
-          <option value="computer" {% if sort == "computer" %}selected{% endif %}>Computer</option>
-          <option value="image" {% if sort == "image" %}selected{% endif %}>Image</option>
-          <option value="indicator" {% if sort == "indicator" %}selected{% endif %}>SHA256</option>
-        {% else %}
-          <option value="listing_state" {% if sort == "listing_state" %}selected{% endif %}>Listing</option>
-          <option value="computer_last" {% if sort == "computer_last" %}selected{% endif %}>Computer</option>
-          <option value="indicator" {% if sort == "indicator" %}selected{% endif %}>
-            {% if tab == 3 %}DestinationIp{% else %}QueryName{% endif %}
-          </option>
-          <option value="source" {% if sort == "source" %}selected{% endif %}>Source</option>
-        {% endif %}
       </select>
     </label>
 
@@ -92,20 +77,20 @@
       <button class="btn primary" type="submit">Apply</button>
 
       {% if tab == 1 %}
-        <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
-        <a class="btn" href="/ui/sysmon/1?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
+        <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/1?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
       {% elif tab == 3 %}
-        <a class="btn" href="/ui/sysmon/3?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
-        <a class="btn" href="/ui/sysmon/3?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
+        <a class="btn" href="/ui/sysmon/3?status=RED&listing_state=LISTED&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/3?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
       {% else %}
-        <a class="btn" href="/ui/sysmon/22?listing_state=LISTED&sort=last_seen&order=desc&page_size={{page_size}}">Open queue</a>
-        <a class="btn" href="/ui/sysmon/22?sort=rare&order=asc&page_size={{page_size}}">Rare first</a>
+        <a class="btn" href="/ui/sysmon/22?status=RED&listing_state=LISTED&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
+        <a class="btn" href="/ui/sysmon/22?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
       {% endif %}
     </div>
   </form>
 
   <div id="tablewrap"
-       hx-get="/ui/sysmon/{{ tab }}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page={{page}}&page_size={{page_size}}"
+       hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page={{ page }}&page_size={{ page_size }}"
        hx-trigger="load">
     <p class="muted">Loading…</p>
   </div>

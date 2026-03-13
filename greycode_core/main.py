@@ -2079,50 +2079,99 @@ async def ui_bulk_action(
     action: str = Form(...),
     selected: list[str] = Form(default=[]),
     ticket_id: str = Form(default=""),
+    tab: int = Form(...),
+    return_to: str = Form("/ui"),
     _auth=Depends(require_login),
 ):
     action = (action or "").strip().lower()
     ticket_id = (ticket_id or "").strip()
-    hashes = [h.strip() for h in selected if h and h.strip()]
+    values = [v.strip() for v in selected if v and v.strip()]
+    redirect_to = return_to or "/ui"
 
-    if not hashes:
-        return RedirectResponse(url="/ui", status_code=303)
+    if not values:
+        return RedirectResponse(url=redirect_to, status_code=303)
 
-    if action == "accept":
-        for h in hashes:
-            await set_disposition(h, "ACCEPTED", actor="ui")
-            await sync_sha256_indexes(r, h)
-        return RedirectResponse(url="/ui", status_code=303)
+    if tab == 1:
+        if action == "accept":
+            for h in values:
+                await set_disposition(h, "ACCEPTED", actor="ui")
+                await sync_sha256_indexes(r, h)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
-    if action == "escalate":
-        if not ticket_id:
-            # No ticket provided; do nothing for now
-            return RedirectResponse(url="/ui", status_code=303)
-        for h in hashes:
-            await set_disposition(h, "ESCALATED", ticket_id=ticket_id, actor="ui")
-            await sync_sha256_indexes(r, h)
-        return RedirectResponse(url="/ui", status_code=303)
+        if action == "escalate":
+            if not ticket_id:
+                return RedirectResponse(url=redirect_to, status_code=303)
+            for h in values:
+                await set_disposition(h, "ESCALATED", ticket_id=ticket_id, actor="ui")
+                await sync_sha256_indexes(r, h)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
-    if action == "clear":
-        for h in hashes:
-            await clear_disposition(h, actor="ui")
-            await sync_sha256_indexes(r, h)
-        return RedirectResponse(url="/ui", status_code=303)
+        if action == "clear":
+            for h in values:
+                await clear_disposition(h, actor="ui")
+                await sync_sha256_indexes(r, h)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
-    if action == "recheck":
-        for h in hashes:
-            await recheck_vt_stage(h)
-            await sync_sha256_indexes(r, h)
-        return RedirectResponse(url="/ui", status_code=303)
+        if action == "recheck":
+            for h in values:
+                await recheck_vt_stage(h)
+                await sync_sha256_indexes(r, h)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
-    if action == "delete":
-        # Confirmation is enforced in the UI via confirm(), but server-side is still OK.
-        for h in hashes:
-            await delete_hash_everywhere(h)
-        return RedirectResponse(url="/ui", status_code=303)
+        if action == "delete":
+            for h in values:
+                await delete_hash_everywhere(h)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
-    return RedirectResponse(url="/ui", status_code=303)
+    elif tab == 3:
+        if action == "accept":
+            for ip in values:
+                ip_norm = normalize_ip(ip)
+                await set_disposition_ip(ip_norm, "ACCEPTED", actor="ui")
+                await sync_ip_indexes(r, ip_norm)
+            return RedirectResponse(url=redirect_to, status_code=303)
 
+        if action == "escalate":
+            if not ticket_id:
+                return RedirectResponse(url=redirect_to, status_code=303)
+            for ip in values:
+                ip_norm = normalize_ip(ip)
+                await set_disposition_ip(ip_norm, "ESCALATED", ticket_id=ticket_id, actor="ui")
+                await sync_ip_indexes(r, ip_norm)
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        if action == "clear":
+            for ip in values:
+                ip_norm = normalize_ip(ip)
+                await clear_disposition_ip(ip_norm, actor="ui")
+                await sync_ip_indexes(r, ip_norm)
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+    elif tab == 22:
+        if action == "accept":
+            for domain in values:
+                dom = normalize_domain(domain)
+                await set_disposition_domain(dom, "ACCEPTED", actor="ui")
+                await sync_domain_indexes(r, dom)
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        if action == "escalate":
+            if not ticket_id:
+                return RedirectResponse(url=redirect_to, status_code=303)
+            for domain in values:
+                dom = normalize_domain(domain)
+                await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
+                await sync_domain_indexes(r, dom)
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+        if action == "clear":
+            for domain in values:
+                dom = normalize_domain(domain)
+                await clear_disposition_domain(dom, actor="ui")
+                await sync_domain_indexes(r, dom)
+            return RedirectResponse(url=redirect_to, status_code=303)
+
+    return RedirectResponse(url=redirect_to, status_code=303)
 
 
 @app.get("/status/{sha256}")

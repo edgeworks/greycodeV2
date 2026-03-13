@@ -10,163 +10,157 @@
     <div style="display:flex; gap:10px; align-items:center;">
       <a class="btn"
          href="#"
-         hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort=rare&order=asc&page=1&page_size={{page_size}}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort=rare&order=asc&page=1&page_size={{ page_size }}"
          hx-target="#tablewrap"
          hx-push-url="true">
         Rare first
       </a>
 
-      {% if tab == 1 %}
-        <div class="bulkmeta">
-          <span class="selbadge" id="selBadge" hidden>
-            <span id="selCount">0</span> selected
-          </span>
+      <div class="bulkmeta">
+        <span class="selbadge" id="selBadge" hidden>
+          <span id="selCount">0</span> selected
+        </span>
 
-          <details class="menu" id="bulkMenu">
-            <summary class="btn">Actions ▾</summary>
+        <details class="menu" id="bulkMenu">
+          <summary class="btn">Actions ▾</summary>
 
-            <div class="menu-panel">
-              <div class="menu-title">Bulk actions</div>
+          <div class="menu-panel">
+            <div class="menu-title">Bulk actions</div>
 
-              <button class="menu-item" type="submit" form="bulkForm" name="action" value="accept">
-                Accept (Benign)
-              </button>
+            <button class="menu-item" type="submit" form="bulkForm" name="action" value="accept">
+              Accept
+            </button>
 
-              <button class="menu-item" type="button" data-bulkaction="escalate">
-                Escalate…
-              </button>
+            <button class="menu-item" type="button" data-bulkaction="escalate">
+              Escalate…
+            </button>
 
-              <button class="menu-item" type="submit" form="bulkForm" name="action" value="clear">
-                Clear disposition
-              </button>
+            <button class="menu-item" type="submit" form="bulkForm" name="action" value="clear">
+              Clear disposition
+            </button>
 
+            {% if tab == 1 %}
               <button class="menu-item" type="submit" form="bulkForm" name="action" value="recheck">
                 Recheck (VT)
               </button>
+            {% endif %}
 
+            {% if tab == 1 %}
               <div class="menu-sep"></div>
 
               <button class="menu-item danger" type="submit" form="bulkForm" name="action" value="delete" data-confirm="delete">
                 Delete selected
               </button>
-            </div>
-          </details>
-        </div>
-      {% endif %}
+            {% endif %}
+          </div>
+        </details>
+      </div>
     </div>
   </div>
 
-  {% if tab == 1 %}
-    </form>
-  {% endif %}
+  <form id="bulkForm" method="post" action="/ui/bulk_action">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <input type="hidden" name="ticket_id" id="bulkTicketId" value="">
+    <input type="hidden" name="return_to" value="{{ request.url }}">
 
-  {% if tab == 1 %}
-    <form id="bulkForm" method="post" action="/ui/bulk_action">
-      <input type="hidden" name="ticket_id" id="bulkTicketId" value="">
-  {% endif %}
-
-  {% macro sort_link(label, key) -%}
-    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
-    {% if key == "rare" %}
-      {% set next_order = "desc" if sort == key and order == "asc" else "asc" %}
-    {% endif %}
-    <a class="sortlink" href="#"
-       hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{key}}&order={{next_order}}&page=1&page_size={{page_size}}"
-       hx-target="#tablewrap"
-       hx-push-url="true">
-      <span>{{ label }}</span>
-      {% if sort == key %}
-        <span class="sort-ind">{{ "↑" if order=="asc" else "↓" }}</span>
+    {% macro sort_link(label, key) -%}
+      {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+      {% if key == "rare" %}
+        {% set next_order = "desc" if sort == key and order == "asc" else "asc" %}
       {% endif %}
-    </a>
-  {%- endmacro %}
+      <a class="sortlink" href="#"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ key }}&order={{ next_order }}&page=1&page_size={{ page_size }}"
+         hx-target="#tablewrap"
+         hx-push-url="true">
+        <span>{{ label }}</span>
+        {% if sort == key %}
+          <span class="sort-ind">{{ "↑" if order == "asc" else "↓" }}</span>
+        {% endif %}
+      </a>
+    {%- endmacro %}
 
-  <table>
-    <thead>
-      <tr>
-        {% if tab == 1 %}
+    <table>
+      <thead>
+        <tr>
           <th class="col-sel">
             <input type="checkbox" id="selectAll" aria-label="Select all on page">
           </th>
-        {% endif %}
 
-        <th class="col-status sortable">{{ sort_link("Status","status") }}</th>
+          <th class="col-status">Status</th>
 
-        {% if tab in [3,22] %}
-          <th class="col-listing sortable">{{ sort_link("Listing","listing_state") }}</th>
-        {% endif %}
+          {% if tab in [3,22] %}
+            <th class="col-listing">Listing</th>
+          {% endif %}
 
-        <th class="col-count sortable num">{{ sort_link("Count","count_total") }}</th>
-        <th class="col-lastseen sortable">{{ sort_link("Last seen","last_seen") }}</th>
+          <th class="col-count sortable num">{{ sort_link("Count", "count_total") }}</th>
+          <th class="col-lastseen sortable">{{ sort_link("Last seen", "last_seen") }}</th>
 
+          {% if tab == 1 %}
+            <th class="col-computer">Computer</th>
+            <th class="col-image">Image</th>
+            <th class="col-sha">{{ indicator_label }}</th>
+          {% elif tab == 3 %}
+            <th class="col-computer">Computer (first/last)</th>
+            <th class="col-indicator">{{ indicator_label }}</th>
+            <th class="col-source">Source</th>
+          {% else %}
+            <th class="col-computer">Computer (first/last)</th>
+            <th class="col-indicator">{{ indicator_label }}</th>
+            <th class="col-source">Source</th>
+          {% endif %}
+        </tr>
+      </thead>
+
+      <tbody>
+      {% for row in rows %}
         {% if tab == 1 %}
-          <th class="col-computer sortable">{{ sort_link("Computer","computer") }}</th>
-          <th class="col-image sortable">{{ sort_link("Image","image") }}</th>
-          <th class="col-sha sortable">{{ sort_link(indicator_label,"indicator") }}</th>
+          {% set id = row.sha256 %}
+          {% set rowclass = row.status %}
         {% elif tab == 3 %}
-          <th class="col-computer_last sortable">{{ sort_link("Computer (first/last)","computer_last") }}</th>
-          <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
-          <th class="col-source sortable">{{ sort_link("Source","source") }}</th>
+          {% set id = row.ip %}
+          {% if row.status == "ERROR" %}
+            {% set rowclass = "ROW_ERROR" %}
+          {% elif row.status == "RED" and row.listing_state == "LISTED" %}
+            {% set rowclass = "ROW_LISTED" %}
+          {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
+            {% set rowclass = "ROW_PENDING" %}
+          {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
+            {% set rowclass = "ROW_NOLISTING" %}
+          {% else %}
+            {% set rowclass = "ROW_OTHER" %}
+          {% endif %}
         {% else %}
-          <th class="col-computer_last sortable">{{ sort_link("Computer (first/last)","computer_last") }}</th>
-          <th class="col-indicator sortable">{{ sort_link(indicator_label,"indicator") }}</th>
-          <th class="col-source sortable">{{ sort_link("Source","source") }}</th>
+          {% set id = row.domain %}
+          {% if row.status == "ERROR" %}
+            {% set rowclass = "ROW_ERROR" %}
+          {% elif row.status == "RED" and row.listing_state == "LISTED" %}
+            {% set rowclass = "ROW_LISTED" %}
+          {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
+            {% set rowclass = "ROW_PENDING" %}
+          {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
+            {% set rowclass = "ROW_NOLISTING" %}
+          {% else %}
+            {% set rowclass = "ROW_OTHER" %}
+          {% endif %}
         {% endif %}
-      </tr>
-    </thead>
 
-    <tbody>
-    {% for row in rows %}
-      {% if tab == 1 %}
-        {% set id = row.sha256 %}
-        {% set rowclass = row.status %}
-      {% elif tab == 3 %}
-        {% set id = row.ip %}
-        {% if row.status == "ERROR" %}
-          {% set rowclass = "ROW_ERROR" %}
-        {% elif row.status == "RED" and row.listing_state == "LISTED" %}
-          {% set rowclass = "ROW_LISTED" %}
-        {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
-          {% set rowclass = "ROW_PENDING" %}
-        {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
-          {% set rowclass = "ROW_NOLISTING" %}
-        {% else %}
-          {% set rowclass = "ROW_OTHER" %}
-        {% endif %}
-      {% else %}
-        {% set id = row.domain %}
-        {% if row.status == "ERROR" %}
-          {% set rowclass = "ROW_ERROR" %}
-        {% elif row.status == "RED" and row.listing_state == "LISTED" %}
-          {% set rowclass = "ROW_LISTED" %}
-        {% elif row.status == "GREY" and row.listing_state == "PENDING" %}
-          {% set rowclass = "ROW_PENDING" %}
-        {% elif row.status == "GREY" and row.listing_state == "NO_LISTING" %}
-          {% set rowclass = "ROW_NOLISTING" %}
-        {% else %}
-          {% set rowclass = "ROW_OTHER" %}
-        {% endif %}
-      {% endif %}
+        <tr class="{{ rowclass }} clickable"
+            hx-get="/ui/sysmon/{{ tab }}/row/{{ id }}"
+            hx-target="#drawer">
 
-      <tr class="{{ rowclass }} clickable"
-          hx-get="/ui/sysmon/{{tab}}/row/{{ id }}"
-          hx-target="#drawer">
-
-        {% if tab == 1 %}
           <td class="col-sel" onclick="event.stopPropagation()">
             <input type="checkbox"
                    class="rowSelect"
                    name="selected"
                    value="{{ id }}"
+                   form="bulkForm"
                    onclick="event.stopPropagation()">
           </td>
-        {% endif %}
 
-        <td class="col-status">
-          {{ row.status }}
+          <td class="col-status">
+            {{ row.status }}
 
-          {% if tab == 1 %}
-            {% if row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
+            {% if tab == 1 and row.status == "RED" and row.vt_malicious and row.vt_malicious|int > 0 %}
               <span class="badge vtred" title="VT malicious engines">{{ row.vt_malicious }}</span>
             {% endif %}
 
@@ -180,55 +174,55 @@
               {% endif %}
             {% endif %}
 
-            {% if row.status == "GREY" %}
+            {% if tab == 1 and row.status == "GREY" %}
               <span class="badge vt-{{ (row.vt_state or 'PENDING')|lower }}">{{ row.vt_state or "PENDING" }}</span>
             {% endif %}
+          </td>
+
+          {% if tab in [3,22] %}
+            <td class="col-listing">
+              {% if row.listing_state %}
+                <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+              {% else %}
+                -
+              {% endif %}
+            </td>
           {% endif %}
-        </td>
 
-        {% if tab in [3,22] %}
-          <td class="col-listing">
-            {% if row.listing_state %}
-              <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
-            {% else %}
-              -
-            {% endif %}
-          </td>
-        {% endif %}
+          <td class="col-count num">{{ row.count_total }}</td>
+          <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
 
-        <td class="col-count num">{{ row.count_total }}</td>
-        <td class="col-lastseen mono">{{ row.last_seen or "-" }}</td>
-
-        {% if tab == 1 %}
-          <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
-          <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
-          <td class="col-indicator mono">
-            {{ row.sha256[:12] }}…
-            <span class="sep">|</span>
-            <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer">VT</a>
-          </td>
-        {% elif tab == 3 %}
-          <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
-            {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
-          </td>
-          <td class="col-indicator mono">{{ row.ip }}</td>
-          <td class="col-source mono">{{ row.source or "-" }}</td>
-        {% else %}
-          <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
-            {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
-          </td>
-          <td class="col-indicator mono">{{ row.domain }}</td>
-          <td class="col-source mono">{{ row.source or "-" }}</td>
-        {% endif %}
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+          {% if tab == 1 %}
+            <td class="col-computer" title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+            <td class="col-image mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+            <td class="col-indicator mono">
+              {{ row.sha256[:12] }}…
+              <span class="sep">|</span>
+              <a href="{{ row.vt_link }}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">VT</a>
+            </td>
+          {% elif tab == 3 %}
+            <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+              {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+            </td>
+            <td class="col-indicator mono">{{ row.ip }}</td>
+            <td class="col-source mono">{{ row.source or "-" }}</td>
+          {% else %}
+            <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
+              {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
+            </td>
+            <td class="col-indicator mono">{{ row.domain }}</td>
+            <td class="col-source mono">{{ row.source or "-" }}</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </form>
 
   <div class="pager">
     {% if page > 1 %}
       <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page-1}}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page-1 }}"
          hx-target="#tablewrap"
          hx-push-url="true">Prev</a>
     {% endif %}
@@ -237,7 +231,7 @@
 
     {% if page * page_size < total %}
       <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{tab}}/table?status={{status}}&triage={{triage}}&listing_state={{listing_state}}&q={{q}}&sort={{sort}}&order={{order}}&page_size={{page_size}}&page={{page+1}}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page+1 }}"
          hx-target="#tablewrap"
          hx-push-url="true">Next</a>
     {% endif %}
