@@ -1,4 +1,3 @@
-
 <div class="card">
   <h2 style="margin-top:0;">Details</h2>
 
@@ -26,7 +25,7 @@
       {% if disp == "ACCEPTED" %}
         <span class="badge disp-accepted">ACCEPTED</span>
       {% elif disp == "ESCALATED" %}
-        <span class="badge disp-escalated">ESCALATED</span>
+        <span class="badge disp-escalated" title="{% if data.get('ticket_id') %}{{ data.get('ticket_id') }}{% endif %}">ESCALATED</span>
       {% else %}
         <span class="badge disp-other">{{ disp }}</span>
       {% endif %}
@@ -131,6 +130,52 @@
 
         <form class="escalate"
               hx-post="/ui/hash/{{ indicator }}/escalate"
+              hx-target="#drawer" hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
+          <input name="ticket_id" placeholder="INC123456" />
+          <button class="btn" type="submit">Escalate</button>
+        </form>
+
+      {% elif tab == 3 %}
+        <button class="btn primary"
+                hx-post="/ui/ip/{{ indicator }}/accept"
+                hx-target="#drawer" hx-swap="innerHTML"
+                hx-on:htmx:afterRequest="gcRefreshTable()">
+          Accept
+        </button>
+
+        <button class="btn"
+                hx-post="/ui/ip/{{ indicator }}/clear"
+                hx-target="#drawer" hx-swap="innerHTML"
+                hx-on:htmx:afterRequest="gcRefreshTable()">
+          Clear
+        </button>
+
+        <form class="escalate"
+              hx-post="/ui/ip/{{ indicator }}/escalate"
+              hx-target="#drawer" hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
+          <input name="ticket_id" placeholder="INC123456" />
+          <button class="btn" type="submit">Escalate</button>
+        </form>
+
+      {% else %}
+        <button class="btn primary"
+                hx-post="/ui/domain/{{ indicator }}/accept"
+                hx-target="#drawer" hx-swap="innerHTML"
+                hx-on:htmx:afterRequest="gcRefreshTable()">
+          Accept
+        </button>
+
+        <button class="btn"
+                hx-post="/ui/domain/{{ indicator }}/clear"
+                hx-target="#drawer" hx-swap="innerHTML"
+                hx-on:htmx:afterRequest="gcRefreshTable()">
+          Clear
+        </button>
+
+        <form class="escalate"
+              hx-post="/ui/domain/{{ indicator }}/escalate"
               hx-target="#drawer" hx-swap="innerHTML"
               hx-on:htmx:afterRequest="gcRefreshTable()">
           <input name="ticket_id" placeholder="INC123456" />
