@@ -638,14 +638,6 @@ async def recheck_vt_stage(sha256: str) -> None:
     # If it happens to be in the queue, remove it to avoid duplicates
     await r.lrem(VT_QUEUE, 0, sha256)
 
-async def delete_hash_everywhere(sha256: str) -> None:
-    """
-    Deletes the hash record and removes it from staging/queue.
-    """
-    key = f"greycode:sha256:{sha256}"
-    await r.delete(key)
-    await r.srem(STAGED_SET, sha256)
-    await r.lrem(VT_QUEUE, 0, sha256)
 
 async def set_disposition(sha256: str, disposition: str, ticket_id: str = "", note: str = "", actor: str = "ui") -> None:
     key = f"greycode:sha256:{sha256}"
@@ -1998,7 +1990,7 @@ async def enrich_dns_bulk(request: Request):
 @app.post("/ui/hash/{sha256}/accept")
 async def ui_hash_accept(sha256: str, request: Request, _auth=Depends(require_login)):
     await set_disposition(sha256, "ACCEPTED", actor="ui")
-    await sync_sha256_indexes(sha256)
+    await sync_sha256_indexes(r, sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/escalate")
@@ -2009,19 +2001,19 @@ async def ui_hash_escalate(sha256: str, request: Request, ticket_id: str = Form(
         return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
     await set_disposition(sha256, "ESCALATED", ticket_id=ticket_id, actor="ui")
-    await sync_sha256_indexes(sha256)
+    await sync_sha256_indexes(r, sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/clear")
 async def ui_hash_clear(sha256: str, request: Request, _auth=Depends(require_login)):
     await clear_disposition(sha256, actor="ui")
-    await sync_sha256_indexes(sha256)
+    await sync_sha256_indexes(r, sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/recheck")
 async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_login)):
     await recheck_vt_stage(sha256)
-    await sync_sha256_indexes(sha256)
+    await sync_sha256_indexes(r, sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 async def delete_hash_everywhere(sha256_value: str) -> None:
@@ -2036,6 +2028,7 @@ async def delete_hash_everywhere(sha256_value: str) -> None:
 async def ui_ip_accept(ip: str, request: Request, _auth=Depends(require_login)):
     ip_norm = normalize_ip(ip)
     await set_disposition_ip(ip_norm, "ACCEPTED", actor="ui")
+    await sync_ip_indexes(r, ip_norm)
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 @app.post("/ui/ip/{ip}/escalate")
@@ -2045,12 +2038,14 @@ async def ui_ip_escalate(ip: str, request: Request, ticket_id: str = Form(...), 
     if not ticket_id:
         raise HTTPException(status_code=400, detail="ticket_id required")
     await set_disposition_ip(ip_norm, "ESCALATED", ticket_id=ticket_id, actor="ui")
+    await sync_ip_indexes(r, ip_norm)
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 @app.post("/ui/ip/{ip}/clear")
 async def ui_ip_clear(ip: str, request: Request, _auth=Depends(require_login)):
     ip_norm = normalize_ip(ip)
     await clear_disposition_ip(ip_norm, actor="ui")
+    await sync_ip_indexes(r, ip_norm)
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 
@@ -2058,6 +2053,7 @@ async def ui_ip_clear(ip: str, request: Request, _auth=Depends(require_login)):
 async def ui_domain_accept(domain: str, request: Request, _auth=Depends(require_login)):
     dom = normalize_domain(domain)
     await set_disposition_domain(dom, "ACCEPTED", actor="ui")
+    await sync_domain_indexes(r, dom)
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/escalate")
@@ -2067,12 +2063,14 @@ async def ui_domain_escalate(domain: str, request: Request, ticket_id: str = For
     if not ticket_id:
         raise HTTPException(status_code=400, detail="ticket_id required")
     await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
+    await sync_domain_indexes(r, dom)
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/clear")
 async def ui_domain_clear(domain: str, request: Request, _auth=Depends(require_login)):
     dom = normalize_domain(domain)
     await clear_disposition_domain(dom, actor="ui")
+    await sync_domain_indexes(r, dom)
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 
@@ -2093,7 +2091,7 @@ async def ui_bulk_action(
     if action == "accept":
         for h in hashes:
             await set_disposition(h, "ACCEPTED", actor="ui")
-            await sync_sha256_indexes(h)
+            await sync_sha256_indexes(r, h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "escalate":
@@ -2102,19 +2100,19 @@ async def ui_bulk_action(
             return RedirectResponse(url="/ui", status_code=303)
         for h in hashes:
             await set_disposition(h, "ESCALATED", ticket_id=ticket_id, actor="ui")
-            await sync_sha256_indexes(h)
+            await sync_sha256_indexes(r, h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "clear":
         for h in hashes:
             await clear_disposition(h, actor="ui")
-            await sync_sha256_indexes(h)
+            await sync_sha256_indexes(r, h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "recheck":
         for h in hashes:
             await recheck_vt_stage(h)
-            await sync_sha256_indexes(h)
+            await sync_sha256_indexes(r, h)
         return RedirectResponse(url="/ui", status_code=303)
 
     if action == "delete":
