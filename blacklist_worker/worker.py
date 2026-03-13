@@ -8,7 +8,7 @@ from typing import List, Tuple
 import redis.asyncio as redis
 
 from greycode_core.alerts.router import AlertRouter
-from greycode_core.indexes import update_listing_indexes, remove_from_all_indexes
+from greycode_core.index_sync import sync_ip_indexes, sync_domain_indexes
 
 from greycode_core.blacklist_engine import (
     Vendor,
@@ -58,48 +58,7 @@ def _iso_to_epoch(ts: str | None) -> float:
         return time.time()
 
 
-async def _sync_ip_indexes(ip_value: str) -> None:
-    key = f"greycode:ip:{ip_value}"
-    data = await r.hgetall(key)
 
-    if not data:
-        await remove_from_all_indexes(r, kind="ip", indicator=ip_value)
-        await r.srem(KNOWN_IPS_SET, ip_value)
-        return
-
-    await r.sadd(KNOWN_IPS_SET, ip_value)
-
-    await update_listing_indexes(
-        r,
-        kind="ip",
-        indicator=ip_value,
-        status=(data.get("status") or "GREY").upper(),
-        count_total=int(data.get("count_total") or 0),
-        last_seen_epoch=_iso_to_epoch(data.get("last_seen")),
-        listing_state=(data.get("listing_state") or "").upper(),
-    )
-
-
-async def _sync_domain_indexes(domain_value: str) -> None:
-    key = f"greycode:domain:{domain_value}"
-    data = await r.hgetall(key)
-
-    if not data:
-        await remove_from_all_indexes(r, kind="domain", indicator=domain_value)
-        await r.srem(KNOWN_DOMAINS_SET, domain_value)
-        return
-
-    await r.sadd(KNOWN_DOMAINS_SET, domain_value)
-
-    await update_listing_indexes(
-        r,
-        kind="domain",
-        indicator=domain_value,
-        status=(data.get("status") or "GREY").upper(),
-        count_total=int(data.get("count_total") or 0),
-        last_seen_epoch=_iso_to_epoch(data.get("last_seen")),
-        listing_state=(data.get("listing_state") or "").upper(),
-    )
 
 
 async def _get_interval_min() -> int:
@@ -141,7 +100,7 @@ async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
                 hits=hits,
                 reason="periodic_recheck",
             )
-            await _sync_ip_indexes(ip)
+            await sync_ip_indexes(r, ip)
 
         if cursor == 0:
             break
@@ -166,7 +125,7 @@ async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
                 hits=hits,
                 reason="periodic_recheck",
             )
-            await _sync_domain_indexes(dom)
+            await sync_domain_indexes(r, dom)
 
         if cursor == 0:
             break
@@ -188,7 +147,7 @@ async def update_cycle(run_reason: str) -> None:
     await save_vendors(r, new_vendors)
     vendors = new_vendors
 
-    #await recheck_all_indicators(vendors, batch=batch)
+    await recheck_all_indicators(vendors, batch=batch)
 
 
 async def worker_loop() -> None:

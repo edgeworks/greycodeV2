@@ -623,8 +623,9 @@ async def update_indicator_record(
     }
 
     transitioned = (prev_state != new_state) and (prev_state != "PENDING")
+    first_resolution = (prev_state == "PENDING")
 
-    if transitioned:
+    if transitioned or first_resolution:
         mapping.update(
             {
                 "prev_listing_state": prev_state,
@@ -649,6 +650,7 @@ async def update_indicator_record(
             limit=50,
         )
 
+        # Alert on first LISTED as well as later LISTED transitions.
         if new_state == "LISTED":
             already = (data.get("alerted_listed_at") or "").strip()
             if not already:
@@ -665,7 +667,8 @@ async def update_indicator_record(
                 await alert_router.send(alert)
                 mapping["alerted_listed_at"] = str(now)
 
-        else:
+        # Only send DELISTED alerts for real transitions, not for first PENDING -> NO_LISTING resolution.
+        elif transitioned:
             already = (data.get("alerted_delisted_at") or "").strip()
             if not already:
                 alert = AlertEvent(
@@ -681,28 +684,20 @@ async def update_indicator_record(
                 await alert_router.send(alert)
                 mapping["alerted_delisted_at"] = str(now)
 
-    if prev_state == "PENDING":
-        mapping.update(
-            {
-                "prev_listing_state": prev_state,
-                "prev_listed_by": _json_dumps(prev_listed_by),
-                "last_transition_at": str(now),
-                "last_transition": ("LISTED" if new_state == "LISTED" else "DELISTED"),
-            }
-        )
-        await _push_history(
-            r,
-            indicator_type=indicator_type,
-            indicator=ind,
-            entry={
-                "ts": now,
-                "reason": reason,
-                "from": "PENDING",
-                "to": new_state,
-                "vendors_added": vendors_added,
-                "vendors_removed": vendors_removed,
-            },
-            limit=50,
-        )
+        else:
+            already = (data.get("alerted_delisted_at") or "").strip()
+            if not already:
+                alert = AlertEvent(
+                    alert_type=("IP_DELISTED" if indicator_type == "ip" else "DOMAIN_DELISTED"),
+                    indicator=ind,
+                    indicator_type=indicator_type,
+                    transition="DELISTED",
+                    listed_by=hits,
+                    vendors_added=vendors_added,
+                    vendors_removed=vendors_removed,
+                    source="blacklist",
+                )
+                await alert_router.send(alert)
+                mapping["alerted_delisted_at"] = str(now)
 
     await r.hset(key, mapping=mapping)
