@@ -592,7 +592,12 @@ async def update_indicator_record(
 ) -> None:
     """
     Update greycode:ip:<ip> or greycode:domain:<dom> with transition detection.
-    Emit alerts on LISTED and DELISTED.
+    Emit alerts on:
+      - PENDING -> LISTED
+      - NO_LISTING -> LISTED
+      - LISTED -> NO_LISTING
+    Do NOT emit on:
+      - PENDING -> NO_LISTING
     """
     now = _now()
 
@@ -622,10 +627,9 @@ async def update_indicator_record(
         "status": ("RED" if new_state == "LISTED" else "GREY"),
     }
 
-    transitioned = (prev_state != new_state) and (prev_state != "PENDING")
-    first_resolution = (prev_state == "PENDING")
+    state_changed = (prev_state != new_state)
 
-    if transitioned or first_resolution:
+    if state_changed:
         mapping.update(
             {
                 "prev_listing_state": prev_state,
@@ -650,10 +654,13 @@ async def update_indicator_record(
             limit=50,
         )
 
-        # Alert on first LISTED as well as later LISTED transitions.
+        # LISTED alert on first listing and on relisting
         if new_state == "LISTED":
-            already = (data.get("alerted_listed_at") or "").strip()
-            if not already:
+            # clear opposite marker so future delist can alert again
+            mapping["alerted_delisted_at"] = ""
+
+            # Do not suppress PENDING->LISTED or NO_LISTING->LISTED
+            if prev_state in ("PENDING", "NO_LISTING"):
                 alert = AlertEvent(
                     alert_type=("IP_LISTED" if indicator_type == "ip" else "DOMAIN_LISTED"),
                     indicator=ind,
@@ -668,32 +675,18 @@ async def update_indicator_record(
                 await alert_router.send(alert)
                 mapping["alerted_listed_at"] = str(now)
 
-        # Only send DELISTED alerts for real transitions, not for first PENDING -> NO_LISTING resolution.
-        elif transitioned:
-            already = (data.get("alerted_delisted_at") or "").strip()
-            if not already:
+        # DELISTED alert only for real listed->no_listing transition
+        elif new_state == "NO_LISTING":
+            # clear opposite marker so future relist can alert again
+            mapping["alerted_listed_at"] = ""
+
+            if prev_state == "LISTED":
                 alert = AlertEvent(
                     alert_type=("IP_DELISTED" if indicator_type == "ip" else "DOMAIN_DELISTED"),
                     indicator=ind,
                     indicator_type=indicator_type,
                     transition="DELISTED",
                     status="GREY",
-                    listed_by=hits,
-                    vendors_added=vendors_added,
-                    vendors_removed=vendors_removed,
-                    source="blacklist",
-                )
-                await alert_router.send(alert)
-                mapping["alerted_delisted_at"] = str(now)
-
-        else:
-            already = (data.get("alerted_delisted_at") or "").strip()
-            if not already:
-                alert = AlertEvent(
-                    alert_type=("IP_DELISTED" if indicator_type == "ip" else "DOMAIN_DELISTED"),
-                    indicator=ind,
-                    indicator_type=indicator_type,
-                    transition="DELISTED",
                     listed_by=hits,
                     vendors_added=vendors_added,
                     vendors_removed=vendors_removed,
