@@ -431,6 +431,16 @@ button.btn {
   min-width: 160px;
 }
 
+/* switch labels must not inherit normal form-label layout */
+.settings-form label.switch,
+label.switch {
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  gap: 0;
+  flex-direction: row;
+}
+
 .controls input,
 .controls select,
 .settings-form input,
@@ -1349,4 +1359,25 @@ body.vendor-preview-modal-open #vendorPreviewPanel {
 
 .vendor-preview-empty {
   color: var(--muted);
+}
+
+
+/* remove any stray marker/bullet rendering near controls */
+td.col-sel,
+th.col-sel {
+  list-style: none;
+}
+
+td.col-sel::marker,
+th.col-sel::marker,
+label.switch::marker,
+summary.btn::marker,
+summary::marker {
+  content: "";
+}
+
+input[type="checkbox"] {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
 }

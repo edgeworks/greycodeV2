@@ -20,7 +20,8 @@
   {% endif %}
 
   {% if items %}
-    <div class="vendor-preview-box">{% for item in items %}{{ item }}{% if not loop.last %}\n{% endif %}{% endfor %}</div>
+    <div class="vendor-preview-box">{% for item in items %}{{ item }}
+  {% endfor %}</div>
   {% else %}
     <div class="vendor-preview-box vendor-preview-empty">No entries currently loaded.</div>
   {% endif %}
