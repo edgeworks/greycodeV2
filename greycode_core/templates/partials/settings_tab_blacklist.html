@@ -13,10 +13,10 @@
         <input
           type="number"
           name="blacklist_update_interval_min"
-          min="5"
+          min="1"
           max="1440"
-          value="{{ settings.blacklist_update_interval_min or 60 }}"
-          placeholder="60">
+          value="{{ settings.blacklist_update_interval_min or 10 }}"
+          placeholder="10">
       </label>
 
       <label>Recheck batch size
@@ -26,8 +26,8 @@
           min="200"
           max="20000"
           step="100"
-          value="{{ settings.blacklist_recheck_batch or 2000 }}"
-          placeholder="2000">
+          value="{{ settings.blacklist_recheck_batch or 5000 }}"
+          placeholder="5000">
       </label>
     </div>
 
@@ -37,7 +37,7 @@
       <div class="vendor-list">
         {% for v in settings.vendors %}
           <div class="vendor-row">
-            <label class="switch">
+            <label class="switch" aria-label="Enable {{ v.name }}">
               <input type="checkbox" name="vendor_enabled_{{ v.key }}" {% if v.enabled %}checked{% endif %}>
               <span class="slider"></span>
             </label>
