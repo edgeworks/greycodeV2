@@ -2045,6 +2045,12 @@ async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_l
     await sync_sha256_indexes(r, sha256)
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
+@app.post("/ui/hash/{sha256}/delete")
+async def ui_hash_delete(sha256: str, request: Request, _auth=Depends(require_login)):
+    await delete_hash_everywhere(sha256)
+    gc = "<div class='card'><h2 style='margin-top:0;'>Details</h2><p class='muted'>Item deleted.</p></div>"
+    return HTMLResponse(gc)
+
 async def delete_hash_everywhere(sha256_value: str) -> None:
     key = f"greycode:sha256:{sha256_value}"
     await r.delete(key)
