@@ -9,7 +9,7 @@
 - FastAPI-based microservice for hash enrichment
 - Redis-backed in-memory cache
 - Asynchronous VirusTotal integration (rate-limited)
-- Modular updater system for public threat feeds (e.g., NSRL)
+- Background blacklist worker for feed sync and indicator rechecks
 - Containerized via Docker + Compose
 - Clean JSON output — easy to integrate with Cribl, Splunk, Kafka, etc.
 
@@ -22,7 +22,7 @@ greycode/
 ├── greycode_core/        # FastAPI API to receive enrichment requests
 ├── vt_worker/            # Background worker to query VirusTotal
 ├── selector/             # Background worker for queue handling
-├── updater/              # Scheduled plugin-based enrichment feed sync
+├── blacklist_worker/     # Background worker for blacklist feed sync/rechecks
 ├── docker-compose.yml    # Multi-container setup
 ├── requirements.txt      # Python dependencies
 └── README.md             # This file
@@ -57,7 +57,7 @@ Response:
 ```json
 {
   "status": "GREEN",
-  "source": "nsrl"
+  "source": "vt"
 }
 ```
 
