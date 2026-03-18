@@ -654,6 +654,11 @@ async def update_indicator_record(
             limit=50,
         )
 
+        print(
+            f"[alert-debug] indicator={ind} prev_state={prev_state} new_state={new_state} "
+            f"state_changed={state_changed} listed_at={data.get('alerted_listed_at')!r}",
+            flush=True,
+        ) #debug alert issue
         # LISTED alert on first listing and on relisting
         if new_state == "LISTED":
             # clear opposite marker so future delist can alert again
@@ -672,7 +677,9 @@ async def update_indicator_record(
                     vendors_removed=vendors_removed,
                     source="blacklist",
                 )
+                print(f"[alert-debug] sending LISTED alert for {ind}", flush=True) #debug alert issue
                 await alert_router.send(alert)
+                print(f"[alert-debug] send() returned for LISTED alert {ind}", flush=True) #debug alert issue
                 mapping["alerted_listed_at"] = str(now)
 
         # DELISTED alert only for real listed->no_listing transition
