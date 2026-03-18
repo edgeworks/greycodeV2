@@ -31,37 +31,45 @@
   </div>
 
   <section class="settings-section">
-    <h2>Profile</h2>
+  <h2>Profile</h2>
 
-    <form
-      class="settings-form"
-      hx-post="/ui/profile/update"
-      hx-target="#profileModalContent"
-      hx-swap="innerHTML">
+  <form
+    class="settings-form"
+    hx-post="/ui/profile/update"
+    hx-target="#profileModalContent"
+    hx-swap="innerHTML">
 
-      <div class="settings-grid">
-        <label>Username
-          <input value="{{ user_profile.username or '' }}" readonly>
-        </label>
+    <div class="settings-grid">
+      <label>Username
+        <input value="{{ user_profile.username or '' }}" readonly>
+      </label>
 
-        <label>Role
-          <input value="{{ user_profile.role or '' }}" readonly>
-        </label>
+      <label>Role
+        <input value="{{ user_profile.role or '' }}" readonly>
+      </label>
 
-        <label>Email
-          <input name="email" value="{{ user_profile.email or '' }}" placeholder="admin@example.org">
-        </label>
+      <label>Email
+        <input name="email" value="{{ user_profile.email or '' }}" placeholder="admin@example.org">
+      </label>
 
-        <label>Last login
-          <input value="{{ user_profile.last_login_at or '' }}" readonly>
-        </label>
-      </div>
+      <label>Theme
+        <select name="theme">
+          {% set active_theme = user_profile.theme or "dark" %}
+          <option value="dark" {% if active_theme == "dark" %}selected{% endif %}>Dark</option>
+          <option value="light" {% if active_theme == "light" %}selected{% endif %}>Light</option>
+        </select>
+      </label>
 
-      <div class="settings-actions">
-        <button class="btn primary" type="submit">Save Profile</button>
-      </div>
-    </form>
-  </section>
+      <label>Last login
+        <input value="{{ user_profile.last_login_at or '' }}" readonly>
+      </label>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save Profile</button>
+    </div>
+  </form>
+</section>
 
   <section class="settings-section">
     <h2>Password</h2>

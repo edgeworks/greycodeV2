@@ -43,6 +43,7 @@ from alerts import AlertRouter
 from user_store import (
     get_user,
     update_user_email,
+    update_user_theme,
     update_user_password_hash,
     set_last_login,
     ensure_bootstrap_admin,
@@ -326,6 +327,19 @@ class DnsEvent(BaseModel):
     # Sysmon ID 22 fields (Cribl passes QueryName, Computer)
     QueryName: str
     Computer: str
+
+async def current_user_theme(request: Request) -> str:
+    uname = current_username(request)
+    if not uname:
+        return "dark"
+
+    user = await get_user(r, uname)
+    theme = (user.get("theme") or "dark").strip().lower()
+    return theme if theme in {"dark", "light"} else "dark"
+
+
+
+
 
 def normalize_ip(ip: str) -> str:
     """
@@ -746,7 +760,15 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, err: str = "", next: str = "/ui"):
-    return templates.TemplateResponse("login.html", {"request": request, "err": err, "next": next})
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "err": err,
+            "next": next,
+            "theme": "dark",
+        },
+    )
 
 
 @app.post("/login")
@@ -793,6 +815,7 @@ async def ui_settings(request: Request, saved: str = "", _auth=Depends(require_l
             "tab": 0,
             "settings": s,
             "saved": saved,
+            "theme": await current_user_theme(request),
             **(await get_ui_metrics()),
             "vt_enabled": await vt_enabled_setting(),
         },
@@ -1144,10 +1167,16 @@ async def ui_profile_modal(request: Request, saved: str = "", err: str = "", _au
 async def ui_profile_update(
     request: Request,
     email: str = Form(""),
+    theme: str = Form("dark"),
     _auth=Depends(require_login),
 ):
     uname = current_username(request)
+    theme = (theme or "dark").strip().lower()
+    if theme not in {"dark", "light"}:
+        theme = "dark"
+
     await update_user_email(r, uname, email)
+    await update_user_theme(r, uname, theme)
 
     user = await get_user(r, uname)
     return templates.TemplateResponse(
@@ -2300,22 +2329,18 @@ async def ui_sysmon(
         {
             "request": request,
             "tab": tab,
-
             "status": status,
             "triage": triage,
             "listing_state": listing_state,
-
             "q": q,
             "sort": sort,
             "order": order,
             "page": page,
             "page_size": page_size,
-
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
-
             "open": open,
-
+            "theme": await current_user_theme(request),
             "vt_enabled": await vt_enabled_setting(),
             **(await get_ui_metrics()),
         },
