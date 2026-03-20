@@ -385,6 +385,16 @@ button.btn {
   stroke-linejoin: round;
 }
 
+.iconbtn .svg-icon.settings-icon path,
+.iconbtn .svg-icon.settings-icon circle {
+  stroke-width: 1.45;
+}
+
+.iconbtn .svg-icon.logout-icon {
+  width: 19px;
+  height: 19px;
+}
+
 .ops-toolbar {
   width: 100%;
   padding: 10px 0 16px;
