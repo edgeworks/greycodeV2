@@ -8,13 +8,6 @@
     </p>
 
     <div style="display:flex; gap:10px; align-items:center;">
-      <a class="btn"
-         href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort=rare&order=asc&page=1&page_size={{ page_size }}"
-         hx-target="#tablewrap"
-         hx-push-url="true">
-        Rare first
-      </a>
 
       {% if can_triage %}
       <div class="bulkmeta">
