@@ -380,14 +380,14 @@ button.btn {
 .iconbtn .svg-icon polyline {
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.3;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
 .iconbtn .svg-icon.settings-icon path,
 .iconbtn .svg-icon.settings-icon circle {
-  stroke-width: 1.45;
+  stroke-width: 1.0;
 }
 
 .iconbtn .svg-icon.logout-icon {
