@@ -1298,6 +1298,105 @@ body.vendor-preview-modal-open #vendorPreviewPanel {
   }
 }
 
+/* ---------- Audit Settings---------- */
+
+.audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.audit-row {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card2);
+  padding: 14px;
+}
+
+.audit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.audit-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.audit-time {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.audit-meta {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.audit-meta .mono {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.audit-details {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.audit-row .badge:nth-child(1) {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.audit-row .badge:nth-child(2) {
+  background: var(--neutral-soft);
+}
+
+.audit-row .badge:nth-child(3) {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.badge.audit-result-success {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
+}
+
+.badge.audit-result-error,
+.badge.audit-result-failed,
+.badge.audit-result-failure {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+}
+
+@media (max-width: 700px) {
+  .audit-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .audit-time {
+    white-space: normal;
+  }
+}
+
 body.spread-modal-open #spreadModalBackdrop,
 body.spread-modal-open #spreadModalPanel {
   opacity: 1;
