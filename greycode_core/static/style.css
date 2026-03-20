@@ -1381,3 +1381,98 @@ input[type="checkbox"] {
   vertical-align: middle;
   margin: 0;
 }
+
+
+/* ---------- User management ---------- */
+
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.user-row {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card2);
+  padding: 14px;
+}
+
+.user-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.user-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.user-meta {
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.user-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.user-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.inline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.inline-form input,
+.inline-form select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+
+.inline-form input:focus,
+.inline-form select:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+@media (max-width: 1100px) {
+  .user-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
