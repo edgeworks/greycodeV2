@@ -26,6 +26,9 @@ import hashlib
 import hmac
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
+import smtplib
+from email.message import EmailMessage
+from urllib.parse import urlencode
 from config_store import cfg_get_bool, cfg_get, cfg_set
 from blacklist_engine import (
     Vendor, 
@@ -53,7 +56,11 @@ from user_store import (
     set_last_login,
     ensure_bootstrap_admin,
     count_active_admins,
+    set_user_invite_sent,
+    set_user_must_change_password,
+    delete_user,
 )
+from invite_store import create_invite_token, validate_invite_token, mark_invite_used
 from indexes import (
     idx_z_last_seen,
     idx_z_count,
@@ -800,6 +807,79 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
         },
     )
 
+def build_external_base_url(request: Request) -> str:
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}"
+
+
+async def send_email_via_settings(
+    request: Request,
+    *,
+    to_addr: str,
+    subject: str,
+    body: str,
+) -> None:
+    s = await load_settings()
+
+    smtp_host = (s.get("notify_smtp_host") or "").strip()
+    smtp_port = int((s.get("notify_smtp_port") or "25").strip())
+    smtp_user = (s.get("notify_smtp_user") or "").strip()
+    smtp_pass = decrypt_secret(s.get("notify_smtp_pass_enc") or "")
+    smtp_starttls = (s.get("notify_smtp_starttls") or "0") == "1"
+    from_addr = (s.get("notify_email_from") or "greycode@localhost").strip()
+
+    if not smtp_host:
+        raise RuntimeError("SMTP host is not configured.")
+
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+        smtp.ehlo()
+        if smtp_starttls:
+            smtp.starttls()
+            smtp.ehlo()
+        if smtp_user:
+            smtp.login(smtp_user, smtp_pass)
+        smtp.send_message(msg)
+
+async def send_user_invite_email(
+    request: Request,
+    *,
+    email: str,
+    first_name: str,
+    invite_token: str,
+) -> None:
+    base_url = build_external_base_url(request)
+    link = f"{base_url}/activate-account?{urlencode({'token': invite_token})}"
+
+    greeting = first_name.strip() if (first_name or "").strip() else "there"
+
+    subject = "Your Greycode account"
+    body = f"""Hello {greeting},
+
+an account has been created for you in Greycode.
+
+Use the link below to activate your account and set your password:
+
+{link}
+
+This link can be used once and expires in 24 hours.
+
+If you did not expect this email, please ignore it.
+
+Greycode
+"""
+    await send_email_via_settings(
+        request,
+        to_addr=email,
+        subject=subject,
+        body=body,
+    )
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, err: str = "", next: str = "/ui"):
@@ -1197,7 +1277,6 @@ async def ui_users_create(
     first_name: str = Form(""),
     last_name: str = Form(""),
     role: str = Form("user"),
-    temporary_password: str = Form(""),
     is_active: str = Form("1"),
     _auth=Depends(require_login),
 ):
@@ -1212,37 +1291,175 @@ async def ui_users_create(
         err = "Email is required."
     elif "@" not in email_norm:
         err = "Email / username must look like an email address."
-    elif len(temporary_password or "") < 10:
-        err = "Temporary password must be at least 10 characters."
     elif await get_user(r, email_norm):
         err = "User already exists."
     else:
+        # create disabled-password placeholder until user activates
+        placeholder_password = pbkdf2_hash(secrets.token_urlsafe(32))
+
         await create_user(
             r,
             username=email_norm,
             email=email_norm,
             first_name=first_name,
             last_name=last_name,
-            password_hash=pbkdf2_hash(temporary_password),
+            password_hash=placeholder_password,
             role=role,
             is_active="1" if active_bool else "0",
             theme="dark",
             created_by=current_username(request),
         )
 
+        invite_token = await create_invite_token(
+            r,
+            username=email_norm,
+            created_by=current_username(request),
+            ttl_seconds=86400,
+        )
+
+        try:
+            await send_user_invite_email(
+                request,
+                email=email_norm,
+                first_name=first_name,
+                invite_token=invite_token,
+            )
+            await set_user_invite_sent(r, email_norm, actor=current_username(request))
+
+            await audit_log(
+                r,
+                actor=current_username(request),
+                actor_role=current_role(request),
+                category="settings",
+                action="create_user",
+                target_kind="user",
+                target=email_norm,
+                details={
+                    "role": role,
+                    "first_name": (first_name or "").strip(),
+                    "last_name": (last_name or "").strip(),
+                    "is_active": active_bool,
+                    "invite_sent": True,
+                },
+            )
+        except Exception as e:
+            err = f"User created, but invite email failed: {e}"
+
+            await audit_log(
+                r,
+                actor=current_username(request),
+                actor_role=current_role(request),
+                category="settings",
+                action="create_user",
+                target_kind="user",
+                target=email_norm,
+                details={
+                    "role": role,
+                    "first_name": (first_name or "").strip(),
+                    "last_name": (last_name or "").strip(),
+                    "is_active": active_bool,
+                    "invite_sent": False,
+                },
+            )
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "user_created" if not err else "",
+            "err": err,
+        },
+    )
+
+@app.post("/ui/users/{username}/resend-invite", response_class=HTMLResponse)
+async def ui_users_resend_invite(
+    request: Request,
+    username: str,
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    username = username.strip().lower()
+    user = await get_user(r, username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    err = ""
+    try:
+        invite_token = await create_invite_token(
+            r,
+            username=username,
+            created_by=current_username(request),
+            ttl_seconds=86400,
+        )
+
+        await send_user_invite_email(
+            request,
+            email=user.get("email") or username,
+            first_name=user.get("first_name") or "",
+            invite_token=invite_token,
+        )
+        await set_user_invite_sent(r, username, actor=current_username(request))
+
         await audit_log(
             r,
             actor=current_username(request),
             actor_role=current_role(request),
             category="settings",
-            action="create_user",
+            action="resend_user_invite",
             target_kind="user",
-            target=email_norm,
+            target=username,
+            details={},
+        )
+    except Exception as e:
+        err = f"Invite email failed: {e}"
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "invite_resent" if not err else "",
+            "err": err,
+        },
+    )
+
+@app.post("/ui/users/{username}/delete", response_class=HTMLResponse)
+async def ui_users_delete(
+    request: Request,
+    username: str,
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    username = username.strip().lower()
+    actor = current_username(request)
+    target = await get_user(r, username)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    err = ""
+    if actor == username:
+        err = "You cannot delete your own account."
+    elif target.get("role") == "admin" and target.get("is_active", "1") == "1" and await count_active_admins(r) <= 1:
+        err = "Cannot delete the last active admin."
+    else:
+        await delete_user(r, username)
+
+        await audit_log(
+            r,
+            actor=actor,
+            actor_role=current_role(request),
+            category="settings",
+            action="delete_user",
+            target_kind="user",
+            target=username,
             details={
-                "role": role,
-                "first_name": (first_name or "").strip(),
-                "last_name": (last_name or "").strip(),
-                "is_active": active_bool,
+                "role": target.get("role", ""),
+                "had_last_login": bool(target.get("last_login_at")),
             },
         )
 
@@ -1252,7 +1469,7 @@ async def ui_users_create(
         {
             "request": request,
             "users": users,
-            "saved": "user_created" if not err else "",
+            "saved": "user_deleted" if not err else "",
             "err": err,
         },
     )
@@ -1300,6 +1517,99 @@ async def ui_users_update_role(
             "saved": "role_updated",
             "err": "",
         },
+    )
+
+@app.get("/activate-account", response_class=HTMLResponse)
+async def activate_account_page(request: Request, token: str = Query(""), err: str = ""):
+    invite = await validate_invite_token(r, token)
+    valid = bool(invite)
+
+    return templates.TemplateResponse(
+        "activate_account.html",
+        {
+            "request": request,
+            "token": token,
+            "valid": valid,
+            "err": err,
+            "theme": "light",
+        },
+    )
+
+
+@app.post("/activate-account", response_class=HTMLResponse)
+async def activate_account_submit(
+    request: Request,
+    token: str = Form(""),
+    password: str = Form(""),
+    password_confirm: str = Form(""),
+):
+    invite = await validate_invite_token(r, token)
+    if not invite:
+        return templates.TemplateResponse(
+            "activate_account.html",
+            {
+                "request": request,
+                "token": token,
+                "valid": False,
+                "err": "This activation link is invalid or expired.",
+                "theme": "light",
+            },
+        )
+
+    if len(password or "") < 10:
+        return templates.TemplateResponse(
+            "activate_account.html",
+            {
+                "request": request,
+                "token": token,
+                "valid": True,
+                "err": "Password must be at least 10 characters.",
+                "theme": "light",
+            },
+        )
+
+    if password != password_confirm:
+        return templates.TemplateResponse(
+            "activate_account.html",
+            {
+                "request": request,
+                "token": token,
+                "valid": True,
+                "err": "Password confirmation does not match.",
+                "theme": "light",
+            },
+        )
+
+    username = (invite.get("username") or "").strip().lower()
+    if not username:
+        return templates.TemplateResponse(
+            "activate_account.html",
+            {
+                "request": request,
+                "token": token,
+                "valid": False,
+                "err": "This activation link is invalid.",
+                "theme": "light",
+            },
+        )
+
+    await update_user_password_hash(r, username, pbkdf2_hash(password))
+    await set_user_must_change_password(r, username, False)
+    await mark_invite_used(r, token)
+
+    await audit_log(
+        r,
+        actor=username,
+        actor_role="user",
+        category="settings",
+        action="activate_account",
+        target_kind="user",
+        target=username,
+        details={},
+    )
+
+    return HTMLResponse(
+        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><link rel='stylesheet' href='/static/style.css'></head><body data-theme='light'><div class='wrap'><section class='card'><h2>Account activated</h2><p class='muted'>Your password has been set. You can now sign in.</p><div class='actions'><a class='btn primary' href='/login'>Go to login</a></div></section></div></body></html>"
     )
 
 @app.post("/ui/users/{username}/active", response_class=HTMLResponse)

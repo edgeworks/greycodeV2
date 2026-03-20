@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Greycode – Activate account</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body data-theme="{{ theme or 'light' }}">
+  <div class="wrap">
+    <header class="card header">
+      <div class="brand">
+        <div class="title">
+          <h1>Greycode</h1>
+          <p>Account activation</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card" style="grid-column: span 12;">
+        <h2>Set your password</h2>
+
+        {% if err %}
+          <p class="login-error">{{ err }}</p>
+        {% endif %}
+
+        {% if valid %}
+          <form method="post" action="/activate-account" class="loginform">
+            <label>New password
+              <input type="password" name="password" autocomplete="new-password" required />
+            </label>
+
+            <label>Confirm password
+              <input type="password" name="password_confirm" autocomplete="new-password" required />
+            </label>
+
+            <input type="hidden" name="token" value="{{ token }}">
+
+            <div class="actions">
+              <button class="btn primary" type="submit">Activate account</button>
+            </div>
+          </form>
+        {% else %}
+          <p class="muted">This link is invalid or expired. Ask an administrator to send a new invitation.</p>
+        {% endif %}
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -46,10 +46,6 @@
           <input name="last_name" placeholder="Optional">
         </label>
 
-        <label>Temporary password
-          <input type="password" name="temporary_password" placeholder="At least 10 characters" required>
-        </label>
-
         <label>Active
           <select name="is_active">
             <option value="1" selected>Active</option>
@@ -59,7 +55,7 @@
       </div>
 
       <div class="settings-actions">
-        <button class="btn primary" type="submit">Create User</button>
+        <button class="btn primary" type="submit">Create User & Send Invite</button>
       </div>
     </form>
   </div>
@@ -130,6 +126,29 @@
               </label>
               <button class="btn" type="submit">Reset password</button>
             </form>
+
+            <form
+              class="inline-form"
+              hx-post="/ui/users/{{ u.username }}/resend-invite"
+              hx-target="#settingsTabContent"
+              hx-swap="innerHTML">
+              <label>Invitation
+                <input value="{{ u.invite_sent_at or 'Not sent yet' }}" readonly>
+              </label>
+              <button class="btn" type="submit">Resend invite</button>
+            </form>
+
+            <form
+              class="inline-form"
+              hx-post="/ui/users/{{ u.username }}/delete"
+              hx-target="#settingsTabContent"
+              hx-swap="innerHTML"
+              hx-confirm="Delete this user permanently? This cannot be undone.">
+              <label>Delete user
+                <input value="Permanent removal" readonly>
+              </label>
+              <button class="btn danger" type="submit">Delete user</button>
+            </form>    
           </div>
         </div>
       {% else %}

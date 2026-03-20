@@ -98,15 +98,55 @@ async def create_user(
             "role": normalize_role(role),
             "theme": normalize_theme(theme),
             "is_active": "1" if str(is_active) == "1" else "0",
+            "must_change_password": "1",
             "created_at": ts,
             "updated_at": ts,
             "last_login_at": "",
             "created_by": (created_by or "").strip().lower(),
+            "invite_sent_at": "",
+            "invited_by": (created_by or "").strip().lower(),
             "disabled_at": "",
             "disabled_by": "",
         },
     )
     await r.sadd(USERS_SET_KEY, uname)
+
+async def set_user_invite_sent(r, username: str, actor: str = "") -> None:
+    uname = normalize_email_username(username)
+    if not uname:
+        raise ValueError("username required")
+
+    await r.hset(
+        user_key(uname),
+        mapping={
+            "invite_sent_at": now_iso(),
+            "invited_by": normalize_email_username(actor),
+            "updated_at": now_iso(),
+        },
+    )
+
+
+async def set_user_must_change_password(r, username: str, must_change: bool) -> None:
+    uname = normalize_email_username(username)
+    if not uname:
+        raise ValueError("username required")
+
+    await r.hset(
+        user_key(uname),
+        mapping={
+            "must_change_password": "1" if must_change else "0",
+            "updated_at": now_iso(),
+        },
+    )
+
+
+async def delete_user(r, username: str) -> None:
+    uname = normalize_email_username(username)
+    if not uname:
+        raise ValueError("username required")
+
+    await r.delete(user_key(uname))
+    await r.srem(USERS_SET_KEY, uname)
 
 
 async def update_user_profile(
