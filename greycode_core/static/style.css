@@ -338,20 +338,52 @@ button.btn {
 }
 
 .iconbtn {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 38px;
   height: 38px;
+  padding: 0;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--card2);
-  color: var(--text);
+  color: var(--muted);
   text-decoration: none;
   cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
 }
 
-.iconbtn:hover { filter: brightness(1.03); }
+.iconbtn:hover {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--border);
+  text-decoration: none;
+}
+
+.iconbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.iconbtn .svg-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.iconbtn .svg-icon path,
+.iconbtn .svg-icon polygon,
+.iconbtn .svg-icon rect,
+.iconbtn .svg-icon circle,
+.iconbtn .svg-icon line,
+.iconbtn .svg-icon polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 .ops-toolbar {
   width: 100%;
