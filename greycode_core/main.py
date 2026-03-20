@@ -24,6 +24,7 @@ import time
 import base64
 import hashlib
 import hmac
+import fnmatch
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 import smtplib
@@ -105,7 +106,7 @@ KNOWN_DOMAINS_SET = "greycode:known:domains"
 INDEX_DIRTY_IP_SET = "greycode:index_dirty:ip"
 INDEX_DIRTY_DOMAIN_SET = "greycode:index_dirty:domain"
 INDEX_DIRTY_SHA256_SET = "greycode:index_dirty:sha256"
-
+MANUAL_FILTERS_KEY = "greycode:cfg:manual_filters"
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -360,6 +361,8 @@ async def load_settings() -> dict[str, Any]:
     s["vt_enabled_bool"] = (s.get("vt_enabled", "0") == "1")
     s["notify_email_enabled_bool"] = (s.get("notify_email_enabled", "0") == "1")
 
+    s["manual_filters"] = await load_manual_filters()
+
     return s
 
 
@@ -371,6 +374,283 @@ async def save_settings(mapping: dict[str, str]) -> None:
     clean = {k: v for k, v in mapping.items() if k in allowed}
     if clean:
         await r.hset(CFG_KEY, mapping=clean)
+
+def normalize_filter_kind(kind: str) -> str:
+    k = (kind or "").strip().lower()
+    if k not in {"image", "ip", "domain"}:
+        raise ValueError("Invalid filter kind")
+    return k
+
+
+def normalize_image_for_match(value: str) -> str:
+    v = (value or "").strip().lower()
+    return v.replace("/", "\\")
+
+
+def normalize_filter_pattern(kind: str, pattern: str) -> str:
+    p = (pattern or "").strip()
+    if not p:
+        raise ValueError("Pattern is required")
+
+    kind = normalize_filter_kind(kind)
+
+    if kind == "image":
+        return normalize_image_for_match(p)
+
+    if kind == "domain":
+        return normalize_domain(p)
+
+    if kind == "ip":
+        return p.strip()
+
+    return p
+
+
+async def load_manual_filters() -> list[dict[str, str]]:
+    raw = await r.get(MANUAL_FILTERS_KEY)
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    out: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        kind = (item.get("kind") or "").strip().lower()
+        pattern = (item.get("pattern") or "").strip()
+        rule_id = (item.get("id") or "").strip()
+
+        if kind not in {"image", "ip", "domain"} or not pattern or not rule_id:
+            continue
+
+        out.append({
+            "id": rule_id,
+            "kind": kind,
+            "pattern": pattern,
+            "created_at": (item.get("created_at") or "").strip(),
+            "created_by": (item.get("created_by") or "").strip().lower(),
+        })
+
+    out.sort(key=lambda x: (x.get("kind", ""), x.get("pattern", "")))
+    return out
+
+
+async def save_manual_filters(filters: list[dict[str, str]]) -> None:
+    await r.set(MANUAL_FILTERS_KEY, json.dumps(filters, ensure_ascii=False, sort_keys=True))
+
+
+def manual_filter_matches(kind: str, pattern: str, value: str) -> bool:
+    kind = normalize_filter_kind(kind)
+
+    if kind == "image":
+        return fnmatch.fnmatchcase(
+            normalize_image_for_match(value),
+            normalize_filter_pattern("image", pattern),
+        )
+
+    if kind == "domain":
+        v = normalize_domain(value)
+        if not v:
+            return False
+        return fnmatch.fnmatchcase(
+            v,
+            normalize_filter_pattern("domain", pattern),
+        )
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(value)
+        except ValueError:
+            return False
+
+        p = normalize_filter_pattern("ip", pattern)
+
+        if "/" in p:
+            try:
+                net = ipaddress.ip_network(p, strict=False)
+                return ipaddress.ip_address(ip_norm) in net
+            except ValueError:
+                return False
+
+        return fnmatch.fnmatchcase(ip_norm, p)
+
+    return False
+
+
+def value_matches_any_manual_filter(filters: list[dict[str, str]], kind: str, value: str) -> bool:
+    for f in filters:
+        if (f.get("kind") or "").lower() != kind:
+            continue
+        if manual_filter_matches(kind, f.get("pattern") or "", value):
+            return True
+    return False
+
+
+async def preview_manual_filter_matches(kind: str, pattern: str, limit: int = 50) -> dict[str, Any]:
+    kind = normalize_filter_kind(kind)
+    pattern = normalize_filter_pattern(kind, pattern)
+
+    total = 0
+    samples: list[dict[str, Any]] = []
+
+    if kind == "image":
+        hashes = sorted(await r.smembers(KNOWN_SHA256_SET))
+        if hashes:
+            pipe = r.pipeline()
+            for h in hashes:
+                pipe.hmget(f"greycode:sha256:{h}", "image", "count_total")
+            raw = await pipe.execute()
+
+            for h, vals in zip(hashes, raw):
+                image = (vals[0] or "") if vals else ""
+                count_total = int((vals[1] or "0")) if vals and len(vals) > 1 else 0
+
+                if manual_filter_matches("image", pattern, image):
+                    total += 1
+                    if len(samples) < limit:
+                        samples.append({
+                            "indicator": h,
+                            "aux": image or "-",
+                            "count_total": count_total,
+                        })
+
+    elif kind == "ip":
+        ips = sorted(await r.smembers(KNOWN_IPS_SET))
+        if ips:
+            pipe = r.pipeline()
+            for ip in ips:
+                pipe.hget(f"greycode:ip:{ip}", "count_total")
+            raw = await pipe.execute()
+
+            for ip, count_val in zip(ips, raw):
+                if manual_filter_matches("ip", pattern, ip):
+                    total += 1
+                    if len(samples) < limit:
+                        samples.append({
+                            "indicator": ip,
+                            "aux": "",
+                            "count_total": int(count_val or 0),
+                        })
+
+    elif kind == "domain":
+        domains = sorted(await r.smembers(KNOWN_DOMAINS_SET))
+        if domains:
+            pipe = r.pipeline()
+            for dom in domains:
+                pipe.hget(f"greycode:domain:{dom}", "count_total")
+            raw = await pipe.execute()
+
+            for dom, count_val in zip(domains, raw):
+                if manual_filter_matches("domain", pattern, dom):
+                    total += 1
+                    if len(samples) < limit:
+                        samples.append({
+                            "indicator": dom,
+                            "aux": "",
+                            "count_total": int(count_val or 0),
+                        })
+
+    return {
+        "kind": kind,
+        "pattern": pattern,
+        "total": total,
+        "samples": samples,
+        "sample_limit": limit,
+        "truncated": total > len(samples),
+    }
+
+
+async def delete_ip_everywhere(ip_value: str) -> None:
+    ip_norm = normalize_ip(ip_value)
+    key = f"greycode:ip:{ip_norm}"
+    await r.delete(key)
+    await r.srem(STAGED_SET_IP, ip_norm)
+    await remove_from_all_indexes(r, kind="ip", indicator=ip_norm)
+    await r.srem(KNOWN_IPS_SET, ip_norm)
+
+
+async def delete_domain_everywhere(domain_value: str) -> None:
+    dom = normalize_domain(domain_value)
+    key = f"greycode:domain:{dom}"
+    await r.delete(key)
+    await r.srem(STAGED_SET_DOMAIN, dom)
+    await remove_from_all_indexes(r, kind="domain", indicator=dom)
+    await r.srem(KNOWN_DOMAINS_SET, dom)
+
+
+async def apply_manual_filter_and_delete_existing(kind: str, pattern: str) -> int:
+    kind = normalize_filter_kind(kind)
+    pattern = normalize_filter_pattern(kind, pattern)
+
+    deleted = 0
+
+    if kind == "image":
+        hashes = sorted(await r.smembers(KNOWN_SHA256_SET))
+        if hashes:
+            pipe = r.pipeline()
+            for h in hashes:
+                pipe.hget(f"greycode:sha256:{h}", "image")
+            raw = await pipe.execute()
+
+            to_delete = [
+                h for h, image in zip(hashes, raw)
+                if manual_filter_matches("image", pattern, image or "")
+            ]
+
+            for h in to_delete:
+                await delete_hash_everywhere(h)
+            deleted = len(to_delete)
+
+    elif kind == "ip":
+        ips = sorted(await r.smembers(KNOWN_IPS_SET))
+        to_delete = [ip for ip in ips if manual_filter_matches("ip", pattern, ip)]
+
+        for ip in to_delete:
+            await delete_ip_everywhere(ip)
+        deleted = len(to_delete)
+
+    elif kind == "domain":
+        domains = sorted(await r.smembers(KNOWN_DOMAINS_SET))
+        to_delete = [dom for dom in domains if manual_filter_matches("domain", pattern, dom)]
+
+        for dom in to_delete:
+            await delete_domain_everywhere(dom)
+        deleted = len(to_delete)
+
+    return deleted
+
+
+async def render_blacklist_settings_modal(
+    request: Request,
+    *,
+    saved: str = "",
+    err: str = "",
+    preview: dict[str, Any] | None = None,
+) -> HTMLResponse:
+    s = await load_settings()
+    return templates.TemplateResponse(
+        "partials/settings_modal.html",
+        {
+            "request": request,
+            "settings": s,
+            "saved": saved,
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            "manual_filter_err": err,
+            "manual_filter_preview": preview,
+            **(await get_ui_metrics()),
+        },
+    )
+
 
 class ProcessEvent(BaseModel):
     # Sysmon ID 1 fields (Cribl passes sha256, Computer, Image)
@@ -1419,6 +1699,118 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
         },
     )
 
+@app.post("/ui/settings/manual-filter/preview")
+async def ui_settings_manual_filter_preview(
+    request: Request,
+    kind: str = Form(""),
+    pattern: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    try:
+        kind_norm = normalize_filter_kind(kind)
+        pattern_norm = normalize_filter_pattern(kind_norm, pattern)
+        preview = await preview_manual_filter_matches(kind_norm, pattern_norm, limit=50)
+        return await render_blacklist_settings_modal(
+            request,
+            preview=preview,
+        )
+    except Exception as e:
+        return await render_blacklist_settings_modal(
+            request,
+            err=str(e),
+        )
+
+
+@app.post("/ui/settings/manual-filter/apply")
+async def ui_settings_manual_filter_apply(
+    request: Request,
+    kind: str = Form(""),
+    pattern: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    try:
+        kind_norm = normalize_filter_kind(kind)
+        pattern_norm = normalize_filter_pattern(kind_norm, pattern)
+
+        filters = await load_manual_filters()
+        exists_already = any(
+            (f.get("kind") == kind_norm and f.get("pattern") == pattern_norm)
+            for f in filters
+        )
+
+        deleted_count = await apply_manual_filter_and_delete_existing(kind_norm, pattern_norm)
+
+        if not exists_already:
+            filters.append({
+                "id": str(uuid.uuid4()),
+                "kind": kind_norm,
+                "pattern": pattern_norm,
+                "created_at": now_iso(),
+                "created_by": current_username(request),
+            })
+            await save_manual_filters(filters)
+
+        await audit_log(
+            r,
+            actor=current_username(request),
+            actor_role=current_role(request),
+            category="settings",
+            action="manual_filter_apply",
+            target_kind=kind_norm,
+            target=pattern_norm,
+            details={
+                "deleted_count": deleted_count,
+                "already_existed": exists_already,
+            },
+        )
+
+        return await render_blacklist_settings_modal(
+            request,
+            saved=f"manual_filter:{kind_norm}",
+        )
+    except Exception as e:
+        return await render_blacklist_settings_modal(
+            request,
+            err=str(e),
+        )
+
+
+@app.post("/ui/settings/manual-filter/{rule_id}/delete")
+async def ui_settings_manual_filter_delete(
+    request: Request,
+    rule_id: str,
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    filters = await load_manual_filters()
+    keep = [f for f in filters if (f.get("id") or "") != rule_id]
+    removed = next((f for f in filters if (f.get("id") or "") == rule_id), None)
+
+    if removed:
+        await save_manual_filters(keep)
+
+        await audit_log(
+            r,
+            actor=current_username(request),
+            actor_role=current_role(request),
+            category="settings",
+            action="manual_filter_delete",
+            target_kind=removed.get("kind") or "",
+            target=removed.get("pattern") or "",
+            details={"rule_id": rule_id},
+        )
+
+    return await render_blacklist_settings_modal(
+        request,
+        saved="manual_filter_deleted" if removed else "",
+    )
+
+
 @app.post("/ui/users/create", response_class=HTMLResponse)
 async def ui_users_create(
     request: Request,
@@ -2039,6 +2431,13 @@ async def ui_profile_password(
 
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):
+    manual_filters = await load_manual_filters()
+    if value_matches_any_manual_filter(manual_filters, "image", event.image):
+        return {
+            "sha256": event.sha256,
+            "filtered": True,
+            "filter_kind": "image",
+        }
     key = f"greycode:sha256:{event.sha256}"
     now = datetime.datetime.utcnow().isoformat()
 
@@ -2134,6 +2533,7 @@ async def enrich_process_bulk(request: Request):
         else:
             raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
 
+    filtered = 0
     accepted = 0
     rejected = 0
     errors = []
@@ -2147,12 +2547,18 @@ async def enrich_process_bulk(request: Request):
     # Aggregate by sha256
     aggregated: dict[str, dict[str, Any]] = {}
 
+    manual_filters = await load_manual_filters()
+
     for idx, obj in enumerate(events):
         try:
             event = ProcessEvent.model_validate(obj)
         except ValidationError as e:
             rejected += 1
             errors.append({"index": idx, "error": e.errors()})
+            continue
+
+        if value_matches_any_manual_filter(manual_filters, "image", event.image):
+            filtered += 1
             continue
 
         accepted += 1
@@ -2187,6 +2593,7 @@ async def enrich_process_bulk(request: Request):
                 "accepted": accepted,
                 "rejected": rejected,
                 "errors": errors[:20],
+                "filtered": filtered,
             }
         )
 
@@ -2266,6 +2673,7 @@ async def enrich_process_bulk(request: Request):
             "accepted": accepted,
             "rejected": rejected,
             "errors": errors[:20],
+            "filtered": filtered,
         }
     )
 
@@ -2281,6 +2689,14 @@ async def enrich_network(event: NetworkEvent):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid DestinationIp")
 
+    manual_filters = await load_manual_filters()
+    if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
+        return {
+            "destination_ip": ip_norm,
+            "filtered": True,
+            "filter_kind": "ip",
+        }
+    
     key = f"greycode:ip:{ip_norm}"
     now = datetime.datetime.utcnow().isoformat()
     now_epoch = time.time()
@@ -2395,6 +2811,8 @@ async def enrich_network_bulk(request: Request):
     new_count = 0
     existing_count = 0
     index_sync_count = 0
+    filtered = 0
+    manual_filters = await load_manual_filters()
 
     # Aggregate by normalized IP
     aggregated: dict[str, dict[str, Any]] = {}
@@ -2412,6 +2830,10 @@ async def enrich_network_bulk(request: Request):
         except ValueError:
             rejected += 1
             errors.append({"index": idx, "error": "Invalid DestinationIp"})
+            continue
+
+        if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
+            filtered += 1
             continue
 
         accepted += 1
@@ -2445,6 +2867,7 @@ async def enrich_network_bulk(request: Request):
                 "accepted": accepted,
                 "rejected": rejected,
                 "errors": errors[:20],
+                "filtered": filtered,
             }
         )
 
@@ -2547,6 +2970,7 @@ async def enrich_network_bulk(request: Request):
             "accepted": accepted,
             "rejected": rejected,
             "errors": errors[:20],
+            "filtered": filtered,
         }
     )
 
@@ -2560,6 +2984,14 @@ async def enrich_dns(event: DnsEvent):
     domain_norm = normalize_domain(event.QueryName)
     if not domain_norm:
         raise HTTPException(status_code=400, detail="Invalid QueryName")
+
+    manual_filters = await load_manual_filters()
+    if value_matches_any_manual_filter(manual_filters, "domain", domain_norm):
+        return {
+            "query_name": domain_norm,
+            "filtered": True,
+            "filter_kind": "domain",
+        }
 
     key = f"greycode:domain:{domain_norm}"
     now = datetime.datetime.utcnow().isoformat()
@@ -2674,6 +3106,8 @@ async def enrich_dns_bulk(request: Request):
     new_count = 0
     existing_count = 0
     index_sync_count = 0
+    filtered = 0
+    manual_filters = await load_manual_filters()
 
     # Aggregate by normalized domain
     aggregated: dict[str, dict[str, Any]] = {}
@@ -2690,6 +3124,10 @@ async def enrich_dns_bulk(request: Request):
         if not domain_norm:
             rejected += 1
             errors.append({"index": idx, "error": "Invalid QueryName"})
+            continue
+
+        if value_matches_any_manual_filter(manual_filters, "domain", domain_norm):
+            filtered += 1
             continue
 
         accepted += 1
@@ -2723,6 +3161,7 @@ async def enrich_dns_bulk(request: Request):
                 "accepted": accepted,
                 "rejected": rejected,
                 "errors": errors[:20],
+                "filtered": filtered,
             }
         )
 
@@ -2825,6 +3264,7 @@ async def enrich_dns_bulk(request: Request):
             "accepted": accepted,
             "rejected": rejected,
             "errors": errors[:20],
+            "filtered": filtered,
         }
     )
 

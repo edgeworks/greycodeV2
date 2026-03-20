@@ -1190,6 +1190,114 @@ body.vendor-preview-modal-open #vendorPreviewPanel {
   }
 }
 
+.manual-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.manual-filter-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card2);
+  padding: 14px;
+}
+
+.manual-filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manual-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.manual-preview-box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card2);
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.manual-preview-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.manual-preview-row:last-child {
+  border-bottom: 0;
+}
+
+.manual-preview-main {
+  color: var(--text);
+  margin-bottom: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.manual-preview-aux {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.manual-preview-count {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.manual-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manual-filter-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card2);
+}
+
+.manual-filter-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manual-filter-item-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 1100px) {
+  .manual-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-filter-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 body.spread-modal-open #spreadModalBackdrop,
 body.spread-modal-open #spreadModalPanel {
   opacity: 1;

@@ -141,3 +141,158 @@
     </div>
   </form>
 </section>
+
+<div class="settings-separator"></div>
+
+<section class="settings-section">
+  <h2>Manual filters</h2>
+  <p class="muted">
+    Exclude unwanted entries from Greycode ingestion. Preview shows currently stored items that would be deleted.
+  </p>
+
+  {% if manual_filter_err %}
+    <div class="notice-banner error">
+      <div>{{ manual_filter_err }}</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% endif %}
+
+  <div class="manual-filter-grid">
+
+    <div class="manual-filter-card">
+      <div class="settings-subtitle">Image path filter</div>
+      <form
+        class="settings-form manual-filter-form"
+        hx-post="/ui/settings/manual-filter/preview"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+        <input type="hidden" name="kind" value="image">
+        <label>Pattern
+          <input type="text" name="pattern" placeholder="C:\Program Files\Vendor\Proxy\*">
+        </label>
+        <div class="hint muted">Wildcard matching with * and ?</div>
+        <div class="settings-actions">
+          <button class="btn" type="submit">Show change</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="manual-filter-card">
+      <div class="settings-subtitle">IP filter</div>
+      <form
+        class="settings-form manual-filter-form"
+        hx-post="/ui/settings/manual-filter/preview"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+        <input type="hidden" name="kind" value="ip">
+        <label>Pattern
+          <input type="text" name="pattern" placeholder="10.20.* or 10.20.0.0/16">
+        </label>
+        <div class="hint muted">Supports exact IP, wildcard, and CIDR</div>
+        <div class="settings-actions">
+          <button class="btn" type="submit">Show change</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="manual-filter-card">
+      <div class="settings-subtitle">Domain filter</div>
+      <form
+        class="settings-form manual-filter-form"
+        hx-post="/ui/settings/manual-filter/preview"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+        <input type="hidden" name="kind" value="domain">
+        <label>Pattern
+          <input type="text" name="pattern" placeholder="*.proxy.local">
+        </label>
+        <div class="hint muted">Wildcard matching with * and ?</div>
+        <div class="settings-actions">
+          <button class="btn" type="submit">Show change</button>
+        </div>
+      </form>
+    </div>
+
+  </div>
+
+  {% if manual_filter_preview %}
+    <div class="settings-block">
+      <div class="settings-subtitle">Preview</div>
+
+      <div class="manual-preview-meta">
+        <span class="badge">{{ manual_filter_preview.kind|upper }}</span>
+        <span class="badge mono">{{ manual_filter_preview.pattern }}</span>
+        <span class="badge">Matches: {{ manual_filter_preview.total }}</span>
+      </div>
+
+      <div class="manual-preview-box">
+        {% if manual_filter_preview.samples %}
+          {% for row in manual_filter_preview.samples %}
+            <div class="manual-preview-row">
+              <div class="manual-preview-main mono">{{ row.indicator }}</div>
+              {% if row.aux %}
+                <div class="manual-preview-aux mono">{{ row.aux }}</div>
+              {% endif %}
+              <div class="manual-preview-count mono">count={{ row.count_total }}</div>
+            </div>
+          {% endfor %}
+
+          {% if manual_filter_preview.truncated %}
+            <div class="muted">Preview truncated to {{ manual_filter_preview.sample_limit }} items.</div>
+          {% endif %}
+        {% else %}
+          <div class="muted">No currently stored items would be deleted.</div>
+        {% endif %}
+      </div>
+
+      <form
+        class="settings-form"
+        hx-post="/ui/settings/manual-filter/apply"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+        <input type="hidden" name="kind" value="{{ manual_filter_preview.kind }}">
+        <input type="hidden" name="pattern" value="{{ manual_filter_preview.pattern }}">
+        <div class="settings-actions">
+          <button class="btn danger" type="submit">
+            Delete and filter
+          </button>
+        </div>
+      </form>
+    </div>
+  {% endif %}
+</section>
+
+<div class="settings-separator"></div>
+
+<section class="settings-section">
+  <h2>Active manual filters</h2>
+  <p class="muted">These filters apply to new ingest immediately.</p>
+
+  {% if settings.manual_filters %}
+    <div class="manual-filter-list">
+      {% for f in settings.manual_filters %}
+        <div class="manual-filter-item">
+          <div class="manual-filter-item-main">
+            <div class="manual-filter-item-top">
+              <span class="badge">{{ f.kind|upper }}</span>
+              <span class="mono">{{ f.pattern }}</span>
+            </div>
+            <div class="muted">
+              Added {{ f.created_at or "-" }}{% if f.created_by %} by {{ f.created_by }}{% endif %}
+            </div>
+          </div>
+
+          <form
+            method="post"
+            hx-post="/ui/settings/manual-filter/{{ f.id }}/delete"
+            hx-target="#settingsModalContent"
+            hx-swap="innerHTML">
+            <button class="btn danger" type="submit">Delete</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No manual filters configured.</p>
+  {% endif %}
+</section>
