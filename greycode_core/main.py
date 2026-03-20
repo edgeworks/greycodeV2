@@ -83,7 +83,6 @@ logger = logging.getLogger("greycode.debug")
 app = FastAPI(title="Greycode API")
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-app.mount("/site", StaticFiles(directory=str(BASE_DIR / "static_site")), name="site")
 r = redis.Redis(host="redis", port=6379, decode_responses=True)
 templates = Jinja2Templates(directory="templates")
 alert_router = AlertRouter()
