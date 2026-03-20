@@ -590,6 +590,7 @@ async def delete_ip_everywhere(ip_value: str) -> None:
     key = f"greycode:ip:{ip_norm}"
     await r.delete(key)
     await r.srem(STAGED_SET_IP, ip_norm)
+    await r.srem(INDEX_DIRTY_IP_SET, ip_norm)
     await remove_from_all_indexes(r, kind="ip", indicator=ip_norm)
     await r.srem(KNOWN_IPS_SET, ip_norm)
 
@@ -597,12 +598,11 @@ async def delete_ip_everywhere(ip_value: str) -> None:
 async def delete_domain_everywhere(domain_value: str) -> None:
     dom = normalize_domain(domain_value)
     key = f"greycode:domain:{dom}"
-    logger.warning("delete_domain_everywhere dom=%s exists_before=%s", dom, await r.exists(key))
     await r.delete(key)
     await r.srem(STAGED_SET_DOMAIN, dom)
+    await r.srem(INDEX_DIRTY_DOMAIN_SET, dom)
     await remove_from_all_indexes(r, kind="domain", indicator=dom)
     await r.srem(KNOWN_DOMAINS_SET, dom)
-    logger.warning("delete_domain_everywhere dom=%s exists_after=%s", dom, await r.exists(key))
 
 async def apply_manual_filter_and_delete_existing(kind: str, pattern: str) -> int:
     kind = normalize_filter_kind(kind)
@@ -3395,6 +3395,7 @@ async def delete_hash_everywhere(sha256_value: str) -> None:
     key = f"greycode:sha256:{sha256_value}"
     await r.delete(key)
     await r.srem(STAGED_SET, sha256_value)
+    await r.srem(INDEX_DIRTY_SHA256_SET, sha256_value)
     await r.lrem(VT_QUEUE, 0, sha256_value)
     await remove_from_all_indexes(r, kind="sha256", indicator=sha256_value)
     await r.srem(KNOWN_SHA256_SET, sha256_value)
