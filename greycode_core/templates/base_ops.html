@@ -20,6 +20,7 @@
 
         <!-- placeholder for future icons -->
         <div class="ops-actions">
+          {% if request.session.get("role") == "admin" %}
           <a class="iconbtn"
             href="/ui/settings"
             hx-get="/ui/settings/modal"
@@ -28,6 +29,7 @@
             hx-on:click="event.preventDefault()"
             title="Settings"
             aria-label="Settings">⚙</a>
+          {% endif %}
           <a class="iconbtn"
             href="/ui/profile/modal"
             hx-get="/ui/profile/modal"

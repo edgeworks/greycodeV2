@@ -40,13 +40,19 @@ from blacklist_engine import (
     DEFAULT_VENDORS,
 )
 from alerts import AlertRouter
+from audit_store import audit_log, get_recent_audit
 from user_store import (
     get_user,
-    update_user_email,
+    list_users,
+    create_user,
+    update_user_profile,
     update_user_theme,
+    update_user_role,
+    set_user_active,
     update_user_password_hash,
     set_last_login,
     ensure_bootstrap_admin,
+    count_active_admins,
 )
 from indexes import (
     idx_z_last_seen,
@@ -169,6 +175,56 @@ def pbkdf2_verify(password: str, encoded: str) -> bool:
     except Exception:
         return False
 
+def current_role(request: Request) -> str:
+    return (request.session.get("role") or "user").strip().lower()
+
+
+async def current_user_theme(request: Request) -> str:
+    uname = current_username(request)
+    if not uname:
+        return "light"
+    user = await get_user(r, uname)
+    theme = (user.get("theme") or "light").strip().lower()
+    return theme if theme in {"dark", "light"} else "light"
+
+
+def require_admin(request: Request):
+    role = current_role(request)
+    if role == "admin":
+        return True
+    raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def require_triage(request: Request):
+    role = current_role(request)
+    if role in {"admin", "analyst"}:
+        return True
+    raise HTTPException(status_code=403, detail="Triage permission required")
+
+
+def require_delete(request: Request):
+    role = current_role(request)
+    if role == "admin":
+        return True
+    raise HTTPException(status_code=403, detail="Delete permission required")
+
+
+def can_manage_settings(request: Request) -> bool:
+    return current_role(request) == "admin"
+
+
+def can_manage_users(request: Request) -> bool:
+    return current_role(request) == "admin"
+
+
+def can_triage(request: Request) -> bool:
+    return current_role(request) in {"admin", "analyst"}
+
+
+def can_delete(request: Request) -> bool:
+    return current_role(request) == "admin"
+
+
 
 async def get_ui_metrics():
     vt_queue_len = await r.llen(VT_QUEUE)
@@ -181,8 +237,6 @@ async def get_ui_metrics():
 async def vt_enabled_setting() -> bool:
     # Default disabled when not set
     return await cfg_get_bool(r, "vt_enabled", default=False)
-
-VENDORS_KEY = "greycode:settings:blacklist_vendors"
 
 VENDORS_KEY = "greycode:blacklist:vendors"
 
@@ -327,18 +381,6 @@ class DnsEvent(BaseModel):
     # Sysmon ID 22 fields (Cribl passes QueryName, Computer)
     QueryName: str
     Computer: str
-
-async def current_user_theme(request: Request) -> str:
-    uname = current_username(request)
-    if not uname:
-        return "dark"
-
-    user = await get_user(r, uname)
-    theme = (user.get("theme") or "dark").strip().lower()
-    return theme if theme in {"dark", "light"} else "dark"
-
-
-
 
 
 def normalize_ip(ip: str) -> str:
@@ -754,6 +796,8 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
             "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
             "vt_last_checked_fmt": fmt_epoch(data.get("vt_last_checked")),
             "vt_next_retry_at_fmt": fmt_epoch(data.get("vt_next_retry_at")),
+            "can_triage": can_triage(request),
+            "can_delete": can_delete(request),
         },
     )
 
@@ -766,7 +810,7 @@ async def login_page(request: Request, err: str = "", next: str = "/ui"):
             "request": request,
             "err": err,
             "next": next,
-            "theme": "dark",
+            "theme": "light",
         },
     )
 
@@ -826,8 +870,9 @@ def settings_partial_for(tab: str) -> str:
         return "partials/settings_tab_notifications.html"
     if tab == "users":
         return "partials/settings_tab_users.html"
+    if tab == "audit":
+        return "partials/settings_tab_audit.html"
     return "partials/settings_tab_blacklists_apis.html"
-
 
 
 @app.get("/ui/settings/tab/{tab_name}", response_class=HTMLResponse)
@@ -847,6 +892,7 @@ async def ui_settings_tab(
 
 @app.post("/ui/settings/blacklist")
 async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
     form = await request.form()
 
     def as_int_str(v: str, default: str, lo: int, hi: int) -> str:
@@ -911,8 +957,34 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
     if threatfox_api_key:
         mapping["threatfox_api_key_enc"] = encrypt_secret(threatfox_api_key)
 
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
+
     await save_settings(mapping)
     await save_vendors(r, [Vendor(**v) for v in new_vendors])
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_blacklist",
+        target_kind="settings",
+        target="blacklist",
+        details={
+            "blacklist_update_interval_min": [
+                prev.get("blacklist_update_interval_min"),
+                update_interval,
+            ],
+            "blacklist_recheck_batch": [
+                prev.get("blacklist_recheck_batch"),
+                recheck_batch,
+            ],
+            "threatfox_api_key_changed": bool(threatfox_api_key),
+            "vendor_count": len(new_vendors),
+        },
+    )
 
     s = await load_settings()
     return templates.TemplateResponse(
@@ -923,6 +995,7 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
             "saved": "blacklist",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
         },
     )
@@ -933,6 +1006,7 @@ async def ui_vendor_fetch_now(
     vendor_key: str,
     _auth=Depends(require_login),
 ):
+    require_admin(request)
     vendors = await load_vendors(r)
     vendor = next((v for v in vendors if v.key == vendor_key), None)
     if not vendor:
@@ -949,7 +1023,19 @@ async def ui_vendor_fetch_now(
 
     await save_vendors(r, new_vendors)
 
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="settings",
+        action="vendor_fetch_now",
+        target_kind="vendor",
+        target=vendor_key,
+        details={"changed": bool(changed)},
+    )
+
     s = await load_settings()
+
     return templates.TemplateResponse(
         "partials/settings_modal.html",
         {
@@ -958,6 +1044,7 @@ async def ui_vendor_fetch_now(
             "saved": f"fetch:{vendor_key}",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
         },
     )
@@ -1040,6 +1127,10 @@ async def root(_auth=Depends(require_login)):
 
 @app.post("/ui/settings/vt")
 async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
     form = await request.form()
 
     vt_enabled = "1" if (form.get("vt_enabled") == "1") else "0"
@@ -1069,6 +1160,23 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
         mapping["vt_api_key_enc"] = encrypt_secret(new_key)
 
     await save_settings(mapping)
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_vt",
+        target_kind="settings",
+        target="vt",
+        details={
+            "vt_enabled": [prev.get("vt_enabled"), vt_enabled],
+            "vt_budget_daily": [prev.get("vt_budget_daily"), daily],
+            "vt_budget_per_min": [prev.get("vt_budget_per_min"), per_min],
+            "vt_api_key_changed": bool(new_key),
+        },
+    )
+
     s = await load_settings()
     return templates.TemplateResponse(
         "partials/settings_modal.html",
@@ -1078,12 +1186,219 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
             "saved": "vt",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
+        },
+    )
+
+@app.post("/ui/users/create", response_class=HTMLResponse)
+async def ui_users_create(
+    request: Request,
+    email: str = Form(""),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    role: str = Form("user"),
+    temporary_password: str = Form(""),
+    is_active: str = Form("1"),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    err = ""
+    email_norm = (email or "").strip().lower()
+    role = (role or "user").strip().lower()
+    active_bool = str(is_active) == "1"
+
+    if not email_norm:
+        err = "Email is required."
+    elif "@" not in email_norm:
+        err = "Email / username must look like an email address."
+    elif len(temporary_password or "") < 10:
+        err = "Temporary password must be at least 10 characters."
+    elif await get_user(r, email_norm):
+        err = "User already exists."
+    else:
+        await create_user(
+            r,
+            username=email_norm,
+            email=email_norm,
+            first_name=first_name,
+            last_name=last_name,
+            password_hash=pbkdf2_hash(temporary_password),
+            role=role,
+            is_active="1" if active_bool else "0",
+            theme="dark",
+            created_by=current_username(request),
+        )
+
+        await audit_log(
+            r,
+            actor=current_username(request),
+            actor_role=current_role(request),
+            category="settings",
+            action="create_user",
+            target_kind="user",
+            target=email_norm,
+            details={
+                "role": role,
+                "first_name": (first_name or "").strip(),
+                "last_name": (last_name or "").strip(),
+                "is_active": active_bool,
+            },
+        )
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "user_created" if not err else "",
+            "err": err,
+        },
+    )
+
+@app.post("/ui/users/{username}/role", response_class=HTMLResponse)
+async def ui_users_update_role(
+    request: Request,
+    username: str,
+    role: str = Form("user"),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    username = username.strip().lower()
+    target = await get_user(r, username)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    old_role = target.get("role", "user")
+    new_role = (role or "user").strip().lower()
+
+    await update_user_role(r, username, new_role)
+
+    # keep session role in sync if admin edits self
+    if current_username(request) == username:
+        request.session["role"] = new_role
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="settings",
+        action="update_user_role",
+        target_kind="user",
+        target=username,
+        details={"old_role": old_role, "new_role": new_role},
+    )
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "role_updated",
+            "err": "",
+        },
+    )
+
+@app.post("/ui/users/{username}/active", response_class=HTMLResponse)
+async def ui_users_update_active(
+    request: Request,
+    username: str,
+    is_active: str = Form("0"),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    username = username.strip().lower()
+    actor = current_username(request)
+    target = await get_user(r, username)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    new_active = str(is_active) == "1"
+    old_active = target.get("is_active", "1") == "1"
+
+    if actor == username and not new_active:
+        err = "You cannot deactivate your own account."
+    elif target.get("role") == "admin" and old_active and not new_active and await count_active_admins(r) <= 1:
+        err = "Cannot deactivate the last active admin."
+    else:
+        err = ""
+        await set_user_active(r, username, new_active, actor=actor)
+
+        await audit_log(
+            r,
+            actor=actor,
+            actor_role=current_role(request),
+            category="settings",
+            action="update_user_active",
+            target_kind="user",
+            target=username,
+            details={"old_active": old_active, "new_active": new_active},
+        )
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "active_updated" if not err else "",
+            "err": err,
+        },
+    )
+
+@app.post("/ui/users/{username}/password", response_class=HTMLResponse)
+async def ui_users_reset_password(
+    request: Request,
+    username: str,
+    new_password: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    username = username.strip().lower()
+    target = await get_user(r, username)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    err = ""
+    if len(new_password or "") < 10:
+        err = "New password must be at least 10 characters."
+    else:
+        await update_user_password_hash(r, username, pbkdf2_hash(new_password))
+
+        await audit_log(
+            r,
+            actor=current_username(request),
+            actor_role=current_role(request),
+            category="settings",
+            action="reset_user_password",
+            target_kind="user",
+            target=username,
+            details={"password_changed": True},
+        )
+
+    users = await list_users(r)
+    return templates.TemplateResponse(
+        "partials/settings_tab_users.html",
+        {
+            "request": request,
+            "users": users,
+            "saved": "password_reset" if not err else "",
+            "err": err,
         },
     )
 
 @app.post("/ui/settings/notifications")
 async def ui_settings_notifications(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()    
     form = await request.form()
 
     enabled = "1" if (form.get("notify_email_enabled") == "1") else "0"
@@ -1113,6 +1428,28 @@ async def ui_settings_notifications(request: Request, _auth=Depends(require_logi
         mapping["notify_smtp_pass_enc"] = encrypt_secret(smtp_pass)
 
     await save_settings(mapping)
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_notifications",
+        target_kind="settings",
+        target="notifications",
+        details={
+            "notify_email_enabled": [prev.get("notify_email_enabled"), enabled],
+            "notify_email_to": [prev.get("notify_email_to"), email_to],
+            "notify_email_from": [prev.get("notify_email_from"), email_from],
+            "notify_email_subject_prefix": [prev.get("notify_email_subject_prefix"), subject_prefix],
+            "notify_smtp_host": [prev.get("notify_smtp_host"), smtp_host],
+            "notify_smtp_port": [prev.get("notify_smtp_port"), smtp_port],
+            "notify_smtp_user": [prev.get("notify_smtp_user"), smtp_user],
+            "notify_smtp_starttls": [prev.get("notify_smtp_starttls"), smtp_starttls],
+            "notify_smtp_pass_changed": bool(smtp_pass),
+        },
+    )
+
     s = await load_settings()
     return templates.TemplateResponse(
         "partials/settings_modal.html",
@@ -1122,6 +1459,7 @@ async def ui_settings_notifications(request: Request, _auth=Depends(require_logi
             "saved": "notifications",
             "settings_tab": "notifications",
             "settings_partial": settings_partial_for("notifications"),
+            "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
         },
     )
@@ -1134,6 +1472,9 @@ async def ui_settings_modal(
     _auth=Depends(require_login),
 ):
     s = await load_settings()
+    users = await list_users(r) if tab == "users" else []
+    audit_rows = await get_recent_audit(r, 100) if tab == "audit" else []
+
     return templates.TemplateResponse(
         "partials/settings_modal.html",
         {
@@ -1142,6 +1483,9 @@ async def ui_settings_modal(
             "saved": saved,
             "settings_tab": tab,
             "settings_partial": settings_partial_for(tab),
+            "users": users,
+            "audit_rows": audit_rows,
+            "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
         },
     )
@@ -1166,16 +1510,26 @@ async def ui_profile_modal(request: Request, saved: str = "", err: str = "", _au
 @app.post("/ui/profile/update", response_class=HTMLResponse)
 async def ui_profile_update(
     request: Request,
-    email: str = Form(""),
-    theme: str = Form("dark"),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    theme: str = Form("light"),
     _auth=Depends(require_login),
 ):
     uname = current_username(request)
-    theme = (theme or "dark").strip().lower()
+    theme = (theme or "light").strip().lower()
     if theme not in {"dark", "light"}:
-        theme = "dark"
+        theme = "light"
 
-    await update_user_email(r, uname, email)
+    user = await get_user(r, uname)
+    current_email = user.get("email") or uname
+
+    await update_user_profile(
+        r,
+        uname,
+        email=current_email,
+        first_name=first_name,
+        last_name=last_name,
+    )
     await update_user_theme(r, uname, theme)
 
     user = await get_user(r, uname)
@@ -2018,12 +2372,24 @@ async def enrich_dns_bulk(request: Request):
 
 @app.post("/ui/hash/{sha256}/accept")
 async def ui_hash_accept(sha256: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     await set_disposition(sha256, "ACCEPTED", actor="ui")
     await sync_sha256_indexes(r, sha256)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="accept",
+        target_kind="sha256",
+        target=sha256,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/escalate")
 async def ui_hash_escalate(sha256: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
+    require_triage(request)
     ticket_id = (ticket_id or "").strip()
     if not ticket_id:
         # Redirect back if no ticket_id provided
@@ -2031,23 +2397,66 @@ async def ui_hash_escalate(sha256: str, request: Request, ticket_id: str = Form(
 
     await set_disposition(sha256, "ESCALATED", ticket_id=ticket_id, actor="ui")
     await sync_sha256_indexes(r, sha256)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="escalate",
+        target_kind="sha256",
+        target=sha256,
+        details={"ticket_id": ticket_id},
+    )
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/clear")
 async def ui_hash_clear(sha256: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     await clear_disposition(sha256, actor="ui")
     await sync_sha256_indexes(r, sha256)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="clear",
+        target_kind="sha256",
+        target=sha256,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/recheck")
 async def ui_hash_recheck(sha256: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     await recheck_vt_stage(sha256)
     await sync_sha256_indexes(r, sha256)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="recheck",
+        target_kind="sha256",
+        target=sha256,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=1, indicator=sha256)
 
 @app.post("/ui/hash/{sha256}/delete")
 async def ui_hash_delete(sha256: str, request: Request, _auth=Depends(require_login)):
+    require_delete(request)
     await delete_hash_everywhere(sha256)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="delete",
+        target_kind="sha256",
+        target=sha256,
+        details={},
+    )
     gc = "<div class='card'><h2 style='margin-top:0;'>Details</h2><p class='muted'>Item deleted.</p></div>"
     return HTMLResponse(gc)
 
@@ -2061,56 +2470,123 @@ async def delete_hash_everywhere(sha256_value: str) -> None:
 
 @app.post("/ui/ip/{ip}/accept")
 async def ui_ip_accept(ip: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     ip_norm = normalize_ip(ip)
     await set_disposition_ip(ip_norm, "ACCEPTED", actor="ui")
     await sync_ip_indexes(r, ip_norm)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="accept",
+        target_kind="ip",
+        target=ip_norm,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 @app.post("/ui/ip/{ip}/escalate")
 async def ui_ip_escalate(ip: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
+    require_triage(request)
     ip_norm = normalize_ip(ip)
     ticket_id = (ticket_id or "").strip()
     if not ticket_id:
         raise HTTPException(status_code=400, detail="ticket_id required")
     await set_disposition_ip(ip_norm, "ESCALATED", ticket_id=ticket_id, actor="ui")
     await sync_ip_indexes(r, ip_norm)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="escalate",
+        target_kind="ip",
+        target=ip_norm,
+        details={"ticket_id": ticket_id},
+    )
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 @app.post("/ui/ip/{ip}/clear")
 async def ui_ip_clear(ip: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     ip_norm = normalize_ip(ip)
     await clear_disposition_ip(ip_norm, actor="ui")
     await sync_ip_indexes(r, ip_norm)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="clear",
+        target_kind="ip",
+        target=ip_norm,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=3, indicator=ip_norm)
 
 
 @app.post("/ui/domain/{domain}/accept")
 async def ui_domain_accept(domain: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     dom = normalize_domain(domain)
     await set_disposition_domain(dom, "ACCEPTED", actor="ui")
     await sync_domain_indexes(r, dom)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="accept",
+        target_kind="domain",
+        target=dom,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/escalate")
 async def ui_domain_escalate(domain: str, request: Request, ticket_id: str = Form(...), _auth=Depends(require_login)):
+    require_triage(request)
     dom = normalize_domain(domain)
     ticket_id = (ticket_id or "").strip()
     if not ticket_id:
         raise HTTPException(status_code=400, detail="ticket_id required")
     await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
     await sync_domain_indexes(r, dom)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="escalate",
+        target_kind="domain",
+        target=dom,
+        details={"ticket_id": ticket_id},
+    )
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 @app.post("/ui/domain/{domain}/clear")
 async def ui_domain_clear(domain: str, request: Request, _auth=Depends(require_login)):
+    require_triage(request)
     dom = normalize_domain(domain)
     await clear_disposition_domain(dom, actor="ui")
     await sync_domain_indexes(r, dom)
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="clear",
+        target_kind="domain",
+        target=dom,
+        details={},
+    )
     return await render_sysmon_drawer(request, tab=22, indicator=dom)
 
 
 @app.post("/ui/bulk_action")
 async def ui_bulk_action(
+    request: Request,
     action: str = Form(...),
     selected: list[str] = Form(default=[]),
     ticket_id: str = Form(default=""),
@@ -2123,39 +2599,44 @@ async def ui_bulk_action(
     values = [v.strip() for v in selected if v and v.strip()]
     redirect_to = return_to or "/ui"
 
+    if action == "delete":
+        require_delete(request)
+    else:
+        require_triage(request)
+
     if not values:
         return RedirectResponse(url=redirect_to, status_code=303)
+
+    target_kind = {1: "sha256", 3: "ip", 22: "domain"}.get(tab, "unknown")
 
     if tab == 1:
         if action == "accept":
             for h in values:
                 await set_disposition(h, "ACCEPTED", actor="ui")
                 await sync_sha256_indexes(r, h)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "escalate":
+        elif action == "escalate":
             if not ticket_id:
                 return RedirectResponse(url=redirect_to, status_code=303)
             for h in values:
                 await set_disposition(h, "ESCALATED", ticket_id=ticket_id, actor="ui")
                 await sync_sha256_indexes(r, h)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "clear":
+        elif action == "clear":
             for h in values:
                 await clear_disposition(h, actor="ui")
                 await sync_sha256_indexes(r, h)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "recheck":
+        elif action == "recheck":
             for h in values:
                 await recheck_vt_stage(h)
                 await sync_sha256_indexes(r, h)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "delete":
+        elif action == "delete":
             for h in values:
                 await delete_hash_everywhere(h)
+
+        else:
             return RedirectResponse(url=redirect_to, status_code=303)
 
     elif tab == 3:
@@ -2164,22 +2645,22 @@ async def ui_bulk_action(
                 ip_norm = normalize_ip(ip)
                 await set_disposition_ip(ip_norm, "ACCEPTED", actor="ui")
                 await sync_ip_indexes(r, ip_norm)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "escalate":
+        elif action == "escalate":
             if not ticket_id:
                 return RedirectResponse(url=redirect_to, status_code=303)
             for ip in values:
                 ip_norm = normalize_ip(ip)
                 await set_disposition_ip(ip_norm, "ESCALATED", ticket_id=ticket_id, actor="ui")
                 await sync_ip_indexes(r, ip_norm)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "clear":
+        elif action == "clear":
             for ip in values:
                 ip_norm = normalize_ip(ip)
                 await clear_disposition_ip(ip_norm, actor="ui")
                 await sync_ip_indexes(r, ip_norm)
+
+        else:
             return RedirectResponse(url=redirect_to, status_code=303)
 
     elif tab == 22:
@@ -2188,23 +2669,40 @@ async def ui_bulk_action(
                 dom = normalize_domain(domain)
                 await set_disposition_domain(dom, "ACCEPTED", actor="ui")
                 await sync_domain_indexes(r, dom)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "escalate":
+        elif action == "escalate":
             if not ticket_id:
                 return RedirectResponse(url=redirect_to, status_code=303)
             for domain in values:
                 dom = normalize_domain(domain)
                 await set_disposition_domain(dom, "ESCALATED", ticket_id=ticket_id, actor="ui")
                 await sync_domain_indexes(r, dom)
-            return RedirectResponse(url=redirect_to, status_code=303)
 
-        if action == "clear":
+        elif action == "clear":
             for domain in values:
                 dom = normalize_domain(domain)
                 await clear_disposition_domain(dom, actor="ui")
                 await sync_domain_indexes(r, dom)
+
+        else:
             return RedirectResponse(url=redirect_to, status_code=303)
+
+    else:
+        return RedirectResponse(url=redirect_to, status_code=303)
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action=f"bulk_{action}",
+        target_kind=target_kind,
+        target=f"{len(values)} items",
+        details={
+            "count": len(values),
+            "ticket_id": ticket_id,
+        },
+    )
 
     return RedirectResponse(url=redirect_to, status_code=303)
 
@@ -2346,8 +2844,10 @@ async def ui_sysmon(
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
             "open": open,
-            "theme": await current_user_theme(request),
             "vt_enabled": await vt_enabled_setting(),
+            "can_triage": can_triage(request),
+            "can_delete": can_delete(request),
+            "theme": await current_user_theme(request),
             **(await get_ui_metrics()),
         },
     )
@@ -2426,6 +2926,8 @@ async def ui_sysmon_table(
             "order": order,
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
+            "can_triage": can_triage(request),
+            "can_delete": can_delete(request),
         },
     )
 

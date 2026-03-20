@@ -1,0 +1,28 @@
+<section class="settings-section">
+  <h2>Audit</h2>
+  <p class="muted">Recent settings and triage actions.</p>
+
+  <div class="audit-list">
+    {% for row in audit_rows %}
+      <div class="audit-row">
+        <div class="audit-head">
+          <div class="audit-title">
+            <span class="badge">{{ row.category }}</span>
+            <span class="badge">{{ row.action }}</span>
+            <span class="badge">{{ row.result }}</span>
+          </div>
+          <div class="audit-time mono">{{ row.ts }}</div>
+        </div>
+
+        <div class="audit-meta">
+          <div><b>Actor:</b> {{ row.actor or "-" }}{% if row.actor_role %} ({{ row.actor_role }}){% endif %}</div>
+          <div><b>Target:</b> {{ row.target_kind or "-" }} / <span class="mono">{{ row.target or "-" }}</span></div>
+        </div>
+
+        <div class="audit-details mono">{{ row.details }}</div>
+      </div>
+    {% else %}
+      <p class="muted">No audit events yet.</p>
+    {% endfor %}
+  </div>
+</section>

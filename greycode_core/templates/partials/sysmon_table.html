@@ -16,6 +16,7 @@
         Rare first
       </a>
 
+      {% if can_triage %}
       <div class="bulkmeta">
         <span class="selbadge" id="selBadge" hidden>
           <span id="selCount">0</span> selected
@@ -45,7 +46,7 @@
               </button>
             {% endif %}
 
-            {% if tab == 1 %}
+            {% if can_delete and tab == 1 %}
               <div class="menu-sep"></div>
 
               <button class="menu-item danger" type="submit" form="bulkForm" name="action" value="delete" data-confirm="delete">
@@ -55,6 +56,7 @@
           </div>
         </details>
       </div>
+      {% endif %}
     </div>
   </div>
 
@@ -154,6 +156,7 @@
                    name="selected"
                    value="{{ id }}"
                    form="bulkForm"
+                   {% if not can_triage %}disabled{% endif %}
                    onclick="event.stopPropagation()">
           </td>
 

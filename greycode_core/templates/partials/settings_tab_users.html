@@ -1,8 +1,140 @@
 <section class="settings-section">
   <h2>Users</h2>
-  <p class="muted">Placeholder for account creation, deletion, and role assignment.</p>
+  <p class="muted">Create accounts, assign roles, and manage access.</p>
 
-  <div class="settings-actions">
-    <button class="btn" type="button" disabled>Manage users</button>
+  {% if saved %}
+    <div class="notice-banner success">
+      <div>Saved: {{ saved }}</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% endif %}
+
+  {% if err %}
+    <div class="notice-banner error">
+      <div>{{ err }}</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% endif %}
+
+  <div class="settings-block">
+    <div class="settings-subtitle">Create user</div>
+
+    <form
+      class="settings-form"
+      hx-post="/ui/users/create"
+      hx-target="#settingsTabContent"
+      hx-swap="innerHTML">
+
+      <div class="settings-grid">
+        <label>Email / Username
+          <input type="email" name="email" placeholder="user@example.org" required>
+        </label>
+
+        <label>Role
+          <select name="role">
+            <option value="user">User</option>
+            <option value="analyst">Analyst</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+
+        <label>First name
+          <input name="first_name" placeholder="Optional">
+        </label>
+
+        <label>Last name
+          <input name="last_name" placeholder="Optional">
+        </label>
+
+        <label>Temporary password
+          <input type="password" name="temporary_password" placeholder="At least 10 characters" required>
+        </label>
+
+        <label>Active
+          <select name="is_active">
+            <option value="1" selected>Active</option>
+            <option value="0">Inactive</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="submit">Create User</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="settings-separator"></div>
+
+  <div class="settings-block">
+    <div class="settings-subtitle">Existing users</div>
+
+    <div class="users-list">
+      {% for u in users %}
+        <div class="user-row">
+          <div class="user-summary">
+            <div class="user-main">
+              <div class="user-name">
+                {{ u.first_name or "" }} {{ u.last_name or "" }}
+                {% if not (u.first_name or u.last_name) %}
+                  <span class="muted">No name</span>
+                {% endif %}
+              </div>
+              <div class="user-meta mono">{{ u.username }}</div>
+            </div>
+
+            <div class="user-badges">
+              <span class="badge">{{ u.role }}</span>
+              <span class="badge">{% if u.is_active == "1" %}active{% else %}inactive{% endif %}</span>
+              <span class="badge">{{ u.theme or "dark" }}</span>
+            </div>
+          </div>
+
+          <div class="user-actions-grid">
+            <form
+              class="inline-form"
+              hx-post="/ui/users/{{ u.username }}/role"
+              hx-target="#settingsTabContent"
+              hx-swap="innerHTML">
+              <label>Role
+                <select name="role">
+                  <option value="user" {% if u.role == "user" %}selected{% endif %}>User</option>
+                  <option value="analyst" {% if u.role == "analyst" %}selected{% endif %}>Analyst</option>
+                  <option value="admin" {% if u.role == "admin" %}selected{% endif %}>Admin</option>
+                </select>
+              </label>
+              <button class="btn" type="submit">Save role</button>
+            </form>
+
+            <form
+              class="inline-form"
+              hx-post="/ui/users/{{ u.username }}/active"
+              hx-target="#settingsTabContent"
+              hx-swap="innerHTML">
+              <label>Status
+                <select name="is_active">
+                  <option value="1" {% if u.is_active == "1" %}selected{% endif %}>Active</option>
+                  <option value="0" {% if u.is_active != "1" %}selected{% endif %}>Inactive</option>
+                </select>
+              </label>
+              <button class="btn" type="submit">Save status</button>
+            </form>
+
+            <form
+              class="inline-form"
+              hx-post="/ui/users/{{ u.username }}/password"
+              hx-target="#settingsTabContent"
+              hx-swap="innerHTML">
+              <label>Reset password
+                <input type="password" name="new_password" placeholder="New password">
+              </label>
+              <button class="btn" type="submit">Reset password</button>
+            </form>
+          </div>
+        </div>
+      {% else %}
+        <p class="muted">No users found.</p>
+      {% endfor %}
+    </div>
   </div>
 </section>

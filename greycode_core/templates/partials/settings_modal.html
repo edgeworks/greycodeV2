@@ -45,6 +45,15 @@
         type="button">
         Notifications
     </button>
+
+    <button
+        class="settings-tab {% if settings_tab == 'audit' %}active{% endif %}"
+        hx-get="/ui/settings/modal?tab=audit"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML"
+        type="button">
+        Audit
+    </button>
   </div>
 
   <div id="settingsTabContent">

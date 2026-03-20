@@ -96,6 +96,7 @@
 
   </div>
 
+  {% if can_triage %}
   <div class="drawer-footer">
     <div class="drawer-actions">
       {% if tab == 1 %}
@@ -119,7 +120,8 @@
                 hx-on:htmx:afterRequest="gcRefreshTable()">
           Recheck
         </button>
-
+        
+        {% if can_delete %}
         <button class="btn danger"
                 hx-post="/ui/hash/{{ indicator }}/delete"
                 hx-target="#drawer" hx-swap="innerHTML"
@@ -127,6 +129,7 @@
                 hx-on:htmx:afterRequest="gcRefreshTable()">
           Delete
         </button>
+        {% endif %}
 
         <form class="escalate"
               hx-post="/ui/hash/{{ indicator }}/escalate"
@@ -184,4 +187,5 @@
       {% endif %}
     </div>
   </div>
+  {% endif %}
 </div>
