@@ -716,6 +716,7 @@ def _build_svg_curve_points(
             "plot_h": height - pad_t - pad_b,
             "max_count": 0,
             "min_count": 0,
+            "sample_counts": [],
         }
 
     sampled = _downsample_series([float(c) for c in counts], max_points=220)
@@ -761,6 +762,7 @@ def _build_svg_curve_points(
         "plot_h": plot_h,
         "max_count": int(max_count),
         "min_count": int(min_count),
+        "sample_counts": [int(v) for v in sampled],
     }
 
 
@@ -788,6 +790,7 @@ async def build_spread_view_model(tab: int) -> dict[str, Any]:
             "area_points": "",
             "baseline_y": 296,
             "has_data": False,
+            "sample_counts_json": "[]",
         }
 
     sorted_desc = counts
@@ -813,6 +816,7 @@ async def build_spread_view_model(tab: int) -> dict[str, Any]:
         "area_points": svg["area_points"],
         "baseline_y": svg["baseline_y"],
         "has_data": True,
+        "sample_counts_json": json.dumps(svg["sample_counts"]),
     }
 
 

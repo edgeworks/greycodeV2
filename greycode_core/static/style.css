@@ -1238,6 +1238,50 @@ body.spread-modal-open #spreadModalPanel {
   }
 }
 
+.spread-hover-catch {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.spread-hover-line {
+  stroke: color-mix(in srgb, var(--accent) 55%, var(--border));
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.spread-hover-dot {
+  fill: var(--accent);
+  stroke: var(--surface-1);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.spread-tooltip {
+  position: absolute;
+  min-width: 96px;
+  max-width: 140px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.spread-tooltip-title {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.spread-tooltip-value {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--text);
+}
 
 /* ---------- Switch ---------- */
 

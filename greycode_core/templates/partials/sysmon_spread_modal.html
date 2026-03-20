@@ -42,16 +42,33 @@
       <div class="spread-chart-meta">
         <span class="badge">Left = common</span>
         <span class="badge">Right = rare</span>
-        <span class="badge">Smoothed by sampling</span>
+        <span class="badge">Hover = sampled count</span>
       </div>
 
       <div class="spread-chart-wrap">
-        <svg class="spread-chart" viewBox="0 0 960 320" preserveAspectRatio="none" aria-label="{{ title }}">
+        <svg
+          id="spreadChartSvg"
+          class="spread-chart"
+          viewBox="0 0 960 320"
+          preserveAspectRatio="none"
+          aria-label="{{ title }}"
+          data-sample-counts='{{ sample_counts_json|safe }}'>
+
           <line x1="18" y1="296" x2="946" y2="296" class="spread-axis"></line>
 
           <polyline points="{{ area_points }}" class="spread-area"></polyline>
           <polyline points="{{ line_points }}" class="spread-line"></polyline>
+
+          <line id="spreadHoverLine" x1="0" y1="14" x2="0" y2="296" class="spread-hover-line" visibility="hidden"></line>
+          <circle id="spreadHoverDot" cx="0" cy="0" r="5" class="spread-hover-dot" visibility="hidden"></circle>
+
+          <rect id="spreadHoverCatch" x="18" y="14" width="928" height="282" class="spread-hover-catch"></rect>
         </svg>
+
+        <div id="spreadTooltip" class="spread-tooltip" hidden>
+          <div class="spread-tooltip-title">Sample</div>
+          <div class="spread-tooltip-value mono" id="spreadTooltipValue">0</div>
+        </div>
       </div>
 
       <div class="spread-axis-labels">
@@ -59,6 +76,119 @@
         <span>Least frequent</span>
       </div>
     </div>
+
+    <script>
+      (function () {
+        const svg = document.getElementById("spreadChartSvg");
+        const tooltip = document.getElementById("spreadTooltip");
+        const tooltipValue = document.getElementById("spreadTooltipValue");
+        const hoverLine = document.getElementById("spreadHoverLine");
+        const hoverDot = document.getElementById("spreadHoverDot");
+        const hoverCatch = document.getElementById("spreadHoverCatch");
+
+        if (!svg || !tooltip || !tooltipValue || !hoverLine || !hoverDot || !hoverCatch) return;
+
+        let sampleCounts = [];
+        try {
+          sampleCounts = JSON.parse(svg.dataset.sampleCounts || "[]");
+        } catch (_) {
+          sampleCounts = [];
+        }
+        if (!sampleCounts.length) return;
+
+        const VB_W = 960;
+        const VB_H = 320;
+        const PAD_L = 18;
+        const PAD_R = 14;
+        const PAD_T = 14;
+        const PAD_B = 24;
+        const PLOT_W = VB_W - PAD_L - PAD_R;
+        const BASELINE_Y = VB_H - PAD_B;
+
+        const maxCount = Math.max(...sampleCounts);
+
+        function yFor(v) {
+          if (maxCount <= 1) return PAD_T + ((VB_H - PAD_T - PAD_B) / 2);
+
+          const top = Math.log10(maxCount + 1);
+          const cur = Math.log10(v + 1);
+          const ratio = top <= 0 ? 0 : (cur / top);
+          return PAD_T + ((VB_H - PAD_T - PAD_B) * (1 - ratio));
+        }
+
+        function setHover(clientX, clientY) {
+          const rect = svg.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+
+          const relX = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+          const xNorm = relX / rect.width;
+
+          const idx = Math.max(0, Math.min(sampleCounts.length - 1, Math.round(xNorm * (sampleCounts.length - 1))));
+          const value = sampleCounts[idx];
+
+          const x = sampleCounts.length === 1
+            ? PAD_L + (PLOT_W / 2)
+            : PAD_L + (PLOT_W * idx / (sampleCounts.length - 1));
+          const y = yFor(value);
+
+          hoverLine.setAttribute("x1", x);
+          hoverLine.setAttribute("x2", x);
+          hoverLine.setAttribute("visibility", "visible");
+
+          hoverDot.setAttribute("cx", x);
+          hoverDot.setAttribute("cy", y);
+          hoverDot.setAttribute("visibility", "visible");
+
+          tooltipValue.textContent = String(value);
+
+          tooltip.hidden = false;
+
+          const wrap = svg.parentElement;
+          if (!wrap) return;
+          const wrapRect = wrap.getBoundingClientRect();
+
+          let left = (x / VB_W) * wrapRect.width + 14;
+          let top = (y / VB_H) * wrapRect.height - 18;
+
+          if (left > wrapRect.width - 120) left = wrapRect.width - 120;
+          if (left < 8) left = 8;
+          if (top < 8) top = 8;
+
+          tooltip.style.left = left + "px";
+          tooltip.style.top = top + "px";
+        }
+
+        function clearHover() {
+          hoverLine.setAttribute("visibility", "hidden");
+          hoverDot.setAttribute("visibility", "hidden");
+          tooltip.hidden = true;
+        }
+
+        hoverCatch.addEventListener("mousemove", function (e) {
+          setHover(e.clientX, e.clientY);
+        });
+
+        hoverCatch.addEventListener("mouseenter", function (e) {
+          setHover(e.clientX, e.clientY);
+        });
+
+        hoverCatch.addEventListener("mouseleave", clearHover);
+
+        hoverCatch.addEventListener("touchstart", function (e) {
+          if (!e.touches || !e.touches.length) return;
+          const t = e.touches[0];
+          setHover(t.clientX, t.clientY);
+        }, { passive: true });
+
+        hoverCatch.addEventListener("touchmove", function (e) {
+          if (!e.touches || !e.touches.length) return;
+          const t = e.touches[0];
+          setHover(t.clientX, t.clientY);
+        }, { passive: true });
+
+        hoverCatch.addEventListener("touchend", clearHover);
+      })();
+    </script>
   {% else %}
     <div class="card">
       <p class="muted" style="margin:0;">No indexed data available yet for this Sysmon tab.</p>
