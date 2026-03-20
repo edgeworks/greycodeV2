@@ -893,6 +893,11 @@ async def fetch_indexed_page(
                 if filter_keys and not all(bool(x) for x in membership_results):
                     continue
 
+                if not data:
+                    await remove_from_all_indexes(r, kind=kind, indicator=m)
+                    await r.srem(known_set_for_kind(kind), m)
+                    continue
+
                 row = build_row_from_data(tab, kind, indicator_field, m, data)
                 if not row_matches_q(tab, row, q_lower):
                     continue
@@ -943,7 +948,14 @@ async def fetch_indexed_page(
                 data_list = await pipe.execute()
 
                 for m, data in zip(need_members, data_list):
-                    rows.append(build_row_from_data(tab, kind, indicator_field, m, data or {}))
+                    data = data or {}
+
+                    if not data:
+                        await remove_from_all_indexes(r, kind=kind, indicator=m)
+                        await r.srem(known_set_for_kind(kind), m)
+                        continue
+
+                    rows.append(build_row_from_data(tab, kind, indicator_field, m, data))
 
             if len(rows) >= page_size:
                 return rows, total
