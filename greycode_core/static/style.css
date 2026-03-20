@@ -1148,6 +1148,97 @@ body.vendor-preview-modal-open #vendorPreviewPanel {
   }
 }
 
+body.spread-modal-open #spreadModalBackdrop,
+body.spread-modal-open #spreadModalPanel {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.spread-modal-shell {
+  max-width: 1100px;
+}
+
+.spread-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.spread-chart-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card2);
+  padding: 14px;
+}
+
+.spread-chart-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.spread-chart-wrap {
+  width: 100%;
+  height: 360px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(to bottom, transparent 0%, transparent 24%, var(--neutral-soft-2) 25%, transparent 26%, transparent 49%, var(--neutral-soft-2) 50%, transparent 51%, transparent 74%, var(--neutral-soft-2) 75%, transparent 76%, transparent 100%);
+  overflow: hidden;
+}
+
+.spread-chart {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.spread-axis {
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.spread-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.spread-area {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke: none;
+}
+
+.spread-axis-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1100px) {
+  .spread-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .spread-chart-wrap {
+    height: 260px;
+  }
+
+  .spread-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 /* ---------- Switch ---------- */
 
 .switch {

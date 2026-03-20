@@ -670,6 +670,151 @@ async def fetch_indexed_page(
 
     return rows, total
 
+def _spread_meta_for_tab(tab: int) -> tuple[str, str, str]:
+    if tab == 1:
+        return "sha256", "SHA256", "Sysmon 1 • Hash spread by count"
+    if tab == 3:
+        return "ip", "Destination IP", "Sysmon 3 • IP spread by count"
+    if tab == 22:
+        return "domain", "Domain", "Sysmon 22 • Domain spread by count"
+    raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+
+def _downsample_series(values: list[float], max_points: int = 240) -> list[float]:
+    if len(values) <= max_points:
+        return values
+
+    if max_points <= 1:
+        return [values[0]]
+
+    step = (len(values) - 1) / float(max_points - 1)
+    sampled: list[float] = []
+    for i in range(max_points):
+        idx = round(i * step)
+        if idx >= len(values):
+            idx = len(values) - 1
+        sampled.append(values[idx])
+    return sampled
+
+
+def _build_svg_curve_points(
+    counts: list[int],
+    *,
+    width: int = 960,
+    height: int = 320,
+    pad_l: int = 18,
+    pad_r: int = 14,
+    pad_t: int = 14,
+    pad_b: int = 24,
+) -> dict[str, Any]:
+    if not counts:
+        return {
+            "line_points": "",
+            "area_points": "",
+            "baseline_y": height - pad_b,
+            "plot_w": width - pad_l - pad_r,
+            "plot_h": height - pad_t - pad_b,
+            "max_count": 0,
+            "min_count": 0,
+        }
+
+    sampled = _downsample_series([float(c) for c in counts], max_points=220)
+
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+    baseline_y = height - pad_b
+
+    max_count = max(sampled)
+    min_count = min(sampled)
+
+    # log scale for a more useful visual when distribution is steep
+    def y_for(v: float) -> float:
+        if max_count <= 1:
+            return pad_t + (plot_h / 2.0)
+
+        top = math.log10(max_count + 1.0)
+        cur = math.log10(v + 1.0)
+        ratio = 0.0 if top <= 0 else (cur / top)
+        return pad_t + (plot_h * (1.0 - ratio))
+
+    n = len(sampled)
+    coords: list[tuple[float, float]] = []
+
+    for i, val in enumerate(sampled):
+        if n == 1:
+            x = pad_l + (plot_w / 2.0)
+        else:
+            x = pad_l + (plot_w * i / (n - 1))
+        y = y_for(val)
+        coords.append((x, y))
+
+    line_points = " ".join(f"{x:.2f},{y:.2f}" for x, y in coords)
+
+    area_coords = [(coords[0][0], baseline_y), *coords, (coords[-1][0], baseline_y)]
+    area_points = " ".join(f"{x:.2f},{y:.2f}" for x, y in area_coords)
+
+    return {
+        "line_points": line_points,
+        "area_points": area_points,
+        "baseline_y": baseline_y,
+        "plot_w": plot_w,
+        "plot_h": plot_h,
+        "max_count": int(max_count),
+        "min_count": int(min_count),
+    }
+
+
+async def build_spread_view_model(tab: int) -> dict[str, Any]:
+    kind, indicator_label, title = _spread_meta_for_tab(tab)
+
+    # descending: most common on the left, rare on the right
+    raw = await r.zrevrange(idx_z_count(kind), 0, -1, withscores=True)
+
+    counts = [int(score) for _, score in raw if int(score) > 0]
+    total_items = len(counts)
+
+    if not counts:
+        return {
+            "tab": tab,
+            "kind": kind,
+            "indicator_label": indicator_label,
+            "title": title,
+            "total_items": 0,
+            "max_count": 0,
+            "min_count": 0,
+            "median_count": 0,
+            "p90_count": 0,
+            "line_points": "",
+            "area_points": "",
+            "baseline_y": 296,
+            "has_data": False,
+        }
+
+    sorted_desc = counts
+    max_count = sorted_desc[0]
+    min_count = sorted_desc[-1]
+    median_count = int(sorted_desc[len(sorted_desc) // 2])
+    p90_idx = max(0, min(len(sorted_desc) - 1, math.ceil(len(sorted_desc) * 0.10) - 1))
+    p90_count = int(sorted_desc[p90_idx])
+
+    svg = _build_svg_curve_points(sorted_desc)
+
+    return {
+        "tab": tab,
+        "kind": kind,
+        "indicator_label": indicator_label,
+        "title": title,
+        "total_items": total_items,
+        "max_count": int(max_count),
+        "min_count": int(min_count),
+        "median_count": median_count,
+        "p90_count": p90_count,
+        "line_points": svg["line_points"],
+        "area_points": svg["area_points"],
+        "baseline_y": svg["baseline_y"],
+        "has_data": True,
+    }
+
 
 async def recheck_vt_stage(sha256: str) -> None:
     """
@@ -3237,6 +3382,22 @@ async def ui_sysmon_table(
             "indicator_field": indicator_field,
             "can_triage": can_triage(request),
             "can_delete": can_delete(request),
+        },
+    )
+
+@app.get("/ui/sysmon/{event_id}/spread/modal", response_class=HTMLResponse)
+async def ui_sysmon_spread_modal(
+    request: Request,
+    event_id: int = ApiPath(..., ge=1),
+    _auth=Depends(require_login),
+):
+    vm = await build_spread_view_model(int(event_id))
+
+    return templates.TemplateResponse(
+        "partials/sysmon_spread_modal.html",
+        {
+            "request": request,
+            **vm,
         },
     )
 

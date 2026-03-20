@@ -79,12 +79,30 @@
       {% if tab == 1 %}
         <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
         <a class="btn" href="/ui/sysmon/1?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
+        <a class="btn"
+          href="/ui/sysmon/1/spread/modal"
+          hx-get="/ui/sysmon/1/spread/modal"
+          hx-target="#spreadModalContent"
+          hx-swap="innerHTML"
+          hx-on:click="event.preventDefault()">Spread</a>
       {% elif tab == 3 %}
         <a class="btn" href="/ui/sysmon/3?status=RED&listing_state=LISTED&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
         <a class="btn" href="/ui/sysmon/3?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
+        <a class="btn"
+          href="/ui/sysmon/3/spread/modal"
+          hx-get="/ui/sysmon/3/spread/modal"
+          hx-target="#spreadModalContent"
+          hx-swap="innerHTML"
+          hx-on:click="event.preventDefault()">Spread</a>
       {% else %}
         <a class="btn" href="/ui/sysmon/22?status=RED&listing_state=LISTED&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
         <a class="btn" href="/ui/sysmon/22?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
+        <a class="btn"
+          href="/ui/sysmon/22/spread/modal"
+          hx-get="/ui/sysmon/22/spread/modal"
+          hx-target="#spreadModalContent"
+          hx-swap="innerHTML"
+          hx-on:click="event.preventDefault()">Spread</a>
       {% endif %}
     </div>
   </form>

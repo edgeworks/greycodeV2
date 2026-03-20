@@ -1,0 +1,67 @@
+<div class="settings-modal-shell spread-modal-shell">
+  <div class="settings-modal-topbar">
+    <div>
+      <h1>{{ title }}</h1>
+      <div class="settings-subtitle">
+        Visual distribution of {{ indicator_label }} values by total count
+      </div>
+    </div>
+
+    <button class="settings-modal-close" type="button" onclick="gcCloseSpreadModal()">✕</button>
+  </div>
+
+  {% if has_data %}
+    <div class="spread-metrics">
+      <div class="fact">
+        <div class="k">Total items</div>
+        <div class="v mono">{{ total_items }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Max count</div>
+        <div class="v mono">{{ max_count }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Median count</div>
+        <div class="v mono">{{ median_count }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Top 10% threshold</div>
+        <div class="v mono">{{ p90_count }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Min count</div>
+        <div class="v mono">{{ min_count }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Scale</div>
+        <div class="v">Log Y-axis</div>
+      </div>
+    </div>
+
+    <div class="spread-chart-card">
+      <div class="spread-chart-meta">
+        <span class="badge">Left = common</span>
+        <span class="badge">Right = rare</span>
+        <span class="badge">Smoothed by sampling</span>
+      </div>
+
+      <div class="spread-chart-wrap">
+        <svg class="spread-chart" viewBox="0 0 960 320" preserveAspectRatio="none" aria-label="{{ title }}">
+          <line x1="18" y1="296" x2="946" y2="296" class="spread-axis"></line>
+
+          <polyline points="{{ area_points }}" class="spread-area"></polyline>
+          <polyline points="{{ line_points }}" class="spread-line"></polyline>
+        </svg>
+      </div>
+
+      <div class="spread-axis-labels">
+        <span>Most frequent</span>
+        <span>Least frequent</span>
+      </div>
+    </div>
+  {% else %}
+    <div class="card">
+      <p class="muted" style="margin:0;">No indexed data available yet for this Sysmon tab.</p>
+    </div>
+  {% endif %}
+</div>

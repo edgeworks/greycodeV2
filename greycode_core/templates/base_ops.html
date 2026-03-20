@@ -96,6 +96,14 @@
     </div>
   </div>
 
+  <div id="spreadModalBackdrop" class="settings-modal-backdrop" onclick="gcCloseSpreadModal()"></div>
+
+  <div id="spreadModalPanel" class="settings-modal-panel" aria-hidden="true">
+    <div id="spreadModalContent" class="settings-modal-content">
+      <!-- HTMX loads spread modal here -->
+    </div>
+  </div>
+
   {% block scripts %}
   <script>
     function gcOpenDrawer() {
@@ -144,6 +152,9 @@
       if (e.key === "Escape") {
         gcCloseDrawer();
         gcCloseSettingsModal();
+        gcCloseProfileModal();
+        gcCloseVendorPreviewModal();
+        gcCloseSpreadModal();
       }
     });
 
@@ -188,6 +199,25 @@
     document.body.addEventListener("htmx:afterSwap", function (e) {
       if (e.target && e.target.id === "vendorPreviewContent") {
         gcOpenVendorPreviewModal();
+      }
+    });
+  </script>
+  <script>
+    function gcOpenSpreadModal() {
+      document.body.classList.add("spread-modal-open");
+      const p = document.getElementById("spreadModalPanel");
+      if (p) p.setAttribute("aria-hidden", "false");
+    }
+
+    function gcCloseSpreadModal() {
+      document.body.classList.remove("spread-modal-open");
+      const p = document.getElementById("spreadModalPanel");
+      if (p) p.setAttribute("aria-hidden", "true");
+    }
+
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "spreadModalContent") {
+        gcOpenSpreadModal();
       }
     });
   </script>
