@@ -1775,8 +1775,7 @@ async def ui_settings_manual_filter_apply(
             for f in filters
         )
 
-        deleted_count = await apply_manual_filter_and_delete_existing(kind_norm, pattern_norm)
-
+        # Save filter first so ingest is blocked immediately
         if not exists_already:
             filters.append({
                 "id": str(uuid.uuid4()),
@@ -1786,6 +1785,8 @@ async def ui_settings_manual_filter_apply(
                 "created_by": current_username(request),
             })
             await save_manual_filters(filters)
+
+        deleted_count = await apply_manual_filter_and_delete_existing(kind_norm, pattern_norm)
 
         await audit_log(
             r,

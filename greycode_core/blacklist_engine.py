@@ -609,6 +609,8 @@ async def update_indicator_record(
         key = f"greycode:domain:{ind}"
 
     data = await r.hgetall(key)
+    if not data:
+        return
     prev_state = (data.get("listing_state") or "PENDING").upper()
     prev_listed_by = _json_loads(data.get("listed_by") or "[]", [])
     if not isinstance(prev_listed_by, list):
