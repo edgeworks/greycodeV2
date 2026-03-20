@@ -142,6 +142,23 @@ async def startup_bootstrap() -> None:
         bootstrap_email="",
     )
 
+# DEBUG Domain filter
+@app.get("/debug/filter-match")
+async def debug_filter_match(kind: str, pattern: str, value: str):
+    kind = normalize_filter_kind(kind)
+    pattern = normalize_filter_pattern(kind, pattern)
+    result = manual_filter_matches(kind, pattern, value)
+
+    return {
+        "kind": kind,
+        "pattern": pattern,
+        "value": value,
+        "match": result,
+    }
+
+
+
+
 def require_login(request: Request):
     if request.session.get("logged_in") is True:
         return True
@@ -580,11 +597,12 @@ async def delete_ip_everywhere(ip_value: str) -> None:
 async def delete_domain_everywhere(domain_value: str) -> None:
     dom = normalize_domain(domain_value)
     key = f"greycode:domain:{dom}"
+    logger.warning("delete_domain_everywhere dom=%s exists_before=%s", dom, await r.exists(key))
     await r.delete(key)
     await r.srem(STAGED_SET_DOMAIN, dom)
     await remove_from_all_indexes(r, kind="domain", indicator=dom)
     await r.srem(KNOWN_DOMAINS_SET, dom)
-
+    logger.warning("delete_domain_everywhere dom=%s exists_after=%s", dom, await r.exists(key))
 
 async def apply_manual_filter_and_delete_existing(kind: str, pattern: str) -> int:
     kind = normalize_filter_kind(kind)
@@ -621,7 +639,10 @@ async def apply_manual_filter_and_delete_existing(kind: str, pattern: str) -> in
         domains = sorted(await r.smembers(KNOWN_DOMAINS_SET))
         to_delete = [dom for dom in domains if manual_filter_matches("domain", pattern, dom)]
 
+        logger.warning("manual-filter domain pattern=%s matched=%d", pattern, len(to_delete))
+
         for dom in to_delete:
+            logger.warning("manual-filter deleting domain=%s", dom)
             await delete_domain_everywhere(dom)
         deleted = len(to_delete)
 
