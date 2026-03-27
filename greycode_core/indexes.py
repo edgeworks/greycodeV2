@@ -31,6 +31,13 @@ def idx_s_disposition(kind: str, disposition: str) -> str:
 def idx_s_triage(kind: str, triage: str) -> str:
     return f"greycode:index:{kind}:triage:{(triage or '').upper()}"
 
+def idx_s_tag(kind: str, tag: str) -> str:
+    return f"greycode:index:{kind}:tag:{(tag or '').strip().lower()}"
+
+
+def idx_s_tags_catalog(kind: str) -> str:
+    return f"greycode:index:{kind}:tags"
+
 
 async def update_common_indexes(
     r,
@@ -129,3 +136,40 @@ async def remove_from_all_indexes(
     if kind in ("ip", "domain"):
         for ls in ("LISTED", "NO_LISTING", "PENDING", "ERROR"):
             await r.srem(idx_s_listing(kind, ls), indicator)
+
+    await remove_from_all_tag_indexes(r, kind=kind, indicator=indicator)
+
+
+async def update_tag_indexes(
+    r,
+    *,
+    kind: str,                 # sha256 | ip | domain
+    indicator: str,
+    tags: list[str],
+) -> None:
+    tags = sorted({(t or "").strip().lower() for t in tags if (t or "").strip()})
+
+    catalog_key = idx_s_tags_catalog(kind)
+
+    # remove indicator from existing tag membership sets first
+    existing_tags = await r.smembers(catalog_key)
+    for t in existing_tags:
+        await r.srem(idx_s_tag(kind, t), indicator)
+
+    # add new memberships
+    if tags:
+        await r.sadd(catalog_key, *tags)
+        for t in tags:
+            await r.sadd(idx_s_tag(kind, t), indicator)
+
+
+async def remove_from_all_tag_indexes(
+    r,
+    *,
+    kind: str,
+    indicator: str,
+) -> None:
+    catalog_key = idx_s_tags_catalog(kind)
+    existing_tags = await r.smembers(catalog_key)
+    for t in existing_tags:
+        await r.srem(idx_s_tag(kind, t), indicator)

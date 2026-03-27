@@ -47,7 +47,14 @@
         </select>
       </label>
     {% endif %}
-
+    <label>Tag
+      <select name="tag">
+        <option value="ALL" {% if tag == "ALL" %}selected{% endif %}>ALL</option>
+        {% for t in available_tags %}
+          <option value="{{ t }}" {% if tag == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <label>Sort
       <select name="sort">
         <option value="last_seen" {% if sort == "last_seen" %}selected{% endif %}>Last seen</option>
@@ -108,8 +115,8 @@
   </form>
 
   <div id="tablewrap"
-       hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page={{ page }}&page_size={{ page_size }}"
-       hx-trigger="load">
+        hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page={{ page }}&page_size={{ page_size }}"
+        hx-trigger="load">
     <p class="muted">Loading…</p>
   </div>
 

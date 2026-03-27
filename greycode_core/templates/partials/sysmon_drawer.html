@@ -93,6 +93,54 @@
         </div>
       {% endif %}
     </div>
+        <div class="settings-separator"></div>
+
+    <section class="annotation-block">
+      <h2 style="margin-top:0;">Annotations</h2>
+
+      <div class="annotation-subblock">
+        <div class="k">Tags</div>
+
+        {% if parsed_tags %}
+          <div class="annotation-tags">
+            {% for t in parsed_tags %}
+              <span class="badge tag-badge">{{ t }}</span>
+            {% endfor %}
+          </div>
+          <div class="annotation-meta muted">
+            Updated {{ data.get("tags_updated_at","-") }}{% if data.get("tags_updated_by") %} by {{ data.get("tags_updated_by") }}{% endif %}
+          </div>
+        {% else %}
+          <div class="muted" style="margin-bottom:8px;">No tags set.</div>
+        {% endif %}
+
+        <form class="annotation-form"
+              hx-post="/ui/{{ data.get('type') or ('sha256' if tab == 1 else 'ip' if tab == 3 else 'domain') }}/{{ indicator }}/tags"
+              hx-target="#drawer" hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
+          <input name="tags" placeholder="proxy, adfs, project-atlas" value="{{ parsed_tags|join(', ') }}">
+          <button class="btn" type="submit">Save tags</button>
+        </form>
+      </div>
+
+      <div class="annotation-subblock">
+        <div class="k">Comment</div>
+
+        {% if data.get("comment_updated_at") %}
+          <div class="annotation-meta muted">
+            Updated {{ data.get("comment_updated_at","-") }}{% if data.get("comment_updated_by") %} by {{ data.get("comment_updated_by") }}{% endif %}
+          </div>
+        {% endif %}
+
+        <form class="annotation-form annotation-form-comment"
+              hx-post="/ui/{{ data.get('type') or ('sha256' if tab == 1 else 'ip' if tab == 3 else 'domain') }}/{{ indicator }}/comment"
+              hx-target="#drawer" hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshTable()">
+          <textarea name="comment" rows="4" placeholder="Add a short note visible inside Greycode only.">{{ comment_text }}</textarea>
+          <button class="btn" type="submit">Save comment</button>
+        </form>
+      </div>
+    </section>
 
   </div>
 

@@ -916,6 +916,77 @@ body.drawer-open .drawer-panel {
   grid-column: span 2;
 }
 
+.tag-badge {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.note-badge {
+  background: var(--neutral-soft);
+  border-color: var(--border);
+}
+
+.annotation-block {
+  margin-top: 16px;
+}
+
+.annotation-subblock + .annotation-subblock {
+  margin-top: 16px;
+}
+
+.annotation-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.annotation-meta {
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+}
+
+.annotation-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.annotation-form input,
+.annotation-form textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  outline: none;
+}
+
+.annotation-form input:focus,
+.annotation-form textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.annotation-form-comment {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.annotation-form-comment textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+@media (max-width: 520px) {
+  .annotation-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .drawer-footer {
   margin-top: auto;
   margin-left: -18px;

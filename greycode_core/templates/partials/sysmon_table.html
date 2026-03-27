@@ -64,7 +64,7 @@
         {% set next_order = "desc" if sort == key and order == "asc" else "asc" %}
       {% endif %}
       <a class="sortlink" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ key }}&order={{ next_order }}&page=1&page_size={{ page_size }}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ key }}&order={{ next_order }}&page=1&page_size={{ page_size }}"
          hx-target="#tablewrap"
          hx-push-url="true">
         <span>{{ label }}</span>
@@ -173,6 +173,18 @@
             {% if tab == 1 and row.status == "GREY" %}
               <span class="badge vt-{{ (row.vt_state or 'PENDING')|lower }}">{{ row.vt_state or "PENDING" }}</span>
             {% endif %}
+            {% if row.tags %}
+              {% for t in row.tags[:2] %}
+                <span class="badge tag-badge">{{ t }}</span>
+              {% endfor %}
+              {% if row.tags|length > 2 %}
+                <span class="badge tag-badge">+{{ row.tags|length - 2 }}</span>
+              {% endif %}
+            {% endif %}
+
+            {% if row.has_comment %}
+              <span class="badge note-badge" title="Comment present">💬</span>
+            {% endif %}
           </td>
 
           {% if tab in [3,22] %}
@@ -218,7 +230,7 @@
   <div class="pager">
     {% if page > 1 %}
       <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page-1 }}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page-1 }}"
          hx-target="#tablewrap"
          hx-push-url="true">Prev</a>
     {% endif %}
@@ -227,7 +239,7 @@
 
     {% if page * page_size < total %}
       <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page+1 }}"
+         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page+1 }}"
          hx-target="#tablewrap"
          hx-push-url="true">Next</a>
     {% endif %}

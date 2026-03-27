@@ -69,8 +69,11 @@ from indexes import (
     idx_s_status,
     idx_s_listing,
     idx_s_triage,
+    idx_s_tag,
+    idx_s_tags_catalog,
     update_sha256_indexes,
     update_listing_indexes,
+    update_tag_indexes,
     remove_from_all_indexes,
 )
 from index_sync import (
@@ -648,6 +651,81 @@ async def apply_manual_filter_and_delete_existing(kind: str, pattern: str) -> in
 
     return deleted
 
+def normalize_tag(tag: str) -> str:
+    t = (tag or "").strip().lower()
+    if not t:
+        return ""
+    allowed = []
+    for ch in t:
+        if ch.isalnum() or ch in {"-", "_", "."}:
+            allowed.append(ch)
+        elif ch.isspace():
+            allowed.append("-")
+    t = "".join(allowed)
+    while "--" in t:
+        t = t.replace("--", "-")
+    return t.strip("-._")
+
+
+def parse_tags_input(raw: str) -> list[str]:
+    if not raw:
+        return []
+    parts = [normalize_tag(p) for p in raw.split(",")]
+    tags = sorted({p for p in parts if p})
+    return tags
+
+
+def parse_tags_field(raw: str) -> list[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return sorted({normalize_tag(str(x)) for x in parsed if normalize_tag(str(x))})
+    except Exception:
+        pass
+    return []
+
+
+def has_comment(data: dict[str, str]) -> bool:
+    return bool((data.get("comment") or "").strip())
+
+
+async def load_available_tags(kind: str) -> list[str]:
+    vals = await r.smembers(idx_s_tags_catalog(kind))
+    return sorted((v or "").strip().lower() for v in vals if (v or "").strip())
+
+
+async def update_record_annotations(
+    *,
+    kind: str,
+    indicator: str,
+    tags: list[str] | None = None,
+    comment: str | None = None,
+    actor: str,
+) -> None:
+    key = record_key_for_kind(kind, indicator)
+    data = await r.hgetall(key)
+    if not data:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    mapping: dict[str, str] = {}
+
+    if tags is not None:
+        tags_norm = sorted({normalize_tag(t) for t in tags if normalize_tag(t)})
+        mapping["tags"] = json.dumps(tags_norm, ensure_ascii=False)
+        mapping["tags_updated_at"] = now_iso()
+        mapping["tags_updated_by"] = actor
+        await update_tag_indexes(r, kind=kind, indicator=indicator, tags=tags_norm)
+
+    if comment is not None:
+        c = (comment or "").strip()
+        mapping["comment"] = c
+        mapping["comment_updated_at"] = now_iso()
+        mapping["comment_updated_by"] = actor
+
+    if mapping:
+        await r.hset(key, mapping=mapping)
 
 async def render_blacklist_settings_modal(
     request: Request,
@@ -784,6 +862,8 @@ def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: st
         "computer_first": data.get("computer_first") or "",
         "computer_last": data.get("computer_last") or "",
         "image": data.get("image") or "",
+        "tags": parse_tags_field(data.get("tags") or ""),
+        "has_comment": has_comment(data),
         "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
     }
     return row
@@ -803,7 +883,7 @@ def row_matches_q(tab: int, row: dict[str, Any], q_lower: str) -> bool:
     return q_lower in hay
 
 
-def filter_set_keys_for(kind: str, status: str, triage: str, listing_state: str) -> list[str]:
+def filter_set_keys_for(kind: str, status: str, triage: str, listing_state: str, tag: str) -> list[str]:
     keys: list[str] = []
 
     if status != "ALL":
@@ -817,6 +897,10 @@ def filter_set_keys_for(kind: str, status: str, triage: str, listing_state: str)
         ls = (listing_state or "ALL").upper()
         if ls in ("LISTED", "NO_LISTING", "PENDING", "ERROR"):
             keys.append(idx_s_listing(kind, ls))
+    
+    tag_norm = normalize_tag(tag or "")
+    if tag_norm and tag_norm != "all":
+        keys.append(idx_s_tag(kind, tag_norm))
 
     return keys
 
@@ -854,6 +938,7 @@ async def fetch_indexed_page(
     status: str,
     triage: str,
     listing_state: str,
+    tag: str,
     q: str,
     sort: str,
     order: str,
@@ -869,7 +954,7 @@ async def fetch_indexed_page(
 
     reverse = (order.lower() != "asc")
     q_lower = (q or "").strip().lower()
-    filter_keys = filter_set_keys_for(kind, status, triage, listing_state)
+    filter_keys = filter_set_keys_for(kind, status, triage, listing_state, tag)
 
     page_start = (page - 1) * page_size
     total = 0 if q_lower else await exact_count_for_filters(kind, filter_keys)
@@ -1254,6 +1339,8 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
     if not data:
         return HTMLResponse("<div class='card'><p class='muted'>Not found.</p></div>", status_code=404)
 
+    parsed_tags = parse_tags_field(data.get("tags") or "")
+
     return templates.TemplateResponse(
         "partials/sysmon_drawer.html",
         {
@@ -1266,6 +1353,8 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
             "vt_next_retry_at_fmt": fmt_epoch(data.get("vt_next_retry_at")),
             "can_triage": can_triage(request),
             "can_delete": can_delete(request),
+            "parsed_tags": parsed_tags,
+            "comment_text": data.get("comment") or "",
         },
     )
 
@@ -2510,6 +2599,7 @@ async def enrich_process(event: ProcessEvent):
             "image": event.image,
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
+            "type": "sha256",
         },
     )
     pipe.sadd(KNOWN_SHA256_SET, event.sha256)
@@ -2679,6 +2769,7 @@ async def enrich_process_bulk(request: Request):
                     "image": image,
                     "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
+                    "type": "sha256",
                 },
             )
             pipe.sadd(KNOWN_SHA256_SET, sha256_value)
@@ -3639,6 +3730,90 @@ async def ui_bulk_action(
 
     return RedirectResponse(url=redirect_to, status_code=303)
 
+@app.post("/ui/{kind}/{indicator}/tags")
+async def ui_item_update_tags(
+    request: Request,
+    kind: str,
+    indicator: str,
+    tags: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    kind = (kind or "").strip().lower()
+    if kind not in {"sha256", "ip", "domain"}:
+        raise HTTPException(status_code=404, detail="Unknown kind")
+
+    if kind == "ip":
+        indicator = normalize_ip(indicator)
+    elif kind == "domain":
+        indicator = normalize_domain(indicator)
+
+    tags_list = parse_tags_input(tags)
+
+    await update_record_annotations(
+        kind=kind,
+        indicator=indicator,
+        tags=tags_list,
+        actor=current_username(request),
+    )
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="update_tags",
+        target_kind=kind,
+        target=indicator,
+        details={"tags": tags_list},
+    )
+
+    tab = 1 if kind == "sha256" else 3 if kind == "ip" else 22
+    return await render_sysmon_drawer(request, tab=tab, indicator=indicator)
+
+
+@app.post("/ui/{kind}/{indicator}/comment")
+async def ui_item_update_comment(
+    request: Request,
+    kind: str,
+    indicator: str,
+    comment: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    kind = (kind or "").strip().lower()
+    if kind not in {"sha256", "ip", "domain"}:
+        raise HTTPException(status_code=404, detail="Unknown kind")
+
+    if kind == "ip":
+        indicator = normalize_ip(indicator)
+    elif kind == "domain":
+        indicator = normalize_domain(indicator)
+
+    comment_value = (comment or "").strip()
+
+    await update_record_annotations(
+        kind=kind,
+        indicator=indicator,
+        comment=comment_value,
+        actor=current_username(request),
+    )
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="triage",
+        action="update_comment",
+        target_kind=kind,
+        target=indicator,
+        details={"comment_set": bool(comment_value)},
+    )
+
+    tab = 1 if kind == "sha256" else 3 if kind == "ip" else 22
+    return await render_sysmon_drawer(request, tab=tab, indicator=indicator)
 
 @app.get("/status/{sha256}")
 async def get_status(sha256: str, _auth=Depends(require_login)):
@@ -3738,6 +3913,7 @@ async def ui_sysmon(
     triage: str = Query("ALL"),
     listing_state: str = Query("ALL"),
     open: str = Query("", alias="open"),
+    tag: str = Query("ALL"),
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
@@ -3781,6 +3957,8 @@ async def ui_sysmon(
             "can_triage": can_triage(request),
             "can_delete": can_delete(request),
             "theme": await current_user_theme(request),
+            "tag": tag,
+            "available_tags": await load_available_tags("sha256" if tab == 1 else "ip" if tab == 3 else "domain"),
             **(await get_ui_metrics()),
         },
     )
@@ -3797,6 +3975,7 @@ async def ui_sysmon_table(
     page_size: int = Query(200, ge=10, le=2000),
     triage: str = Query("ALL"),
     listing_state: str = Query("ALL"),
+    tag: str = Query("ALL"),
     _auth=Depends(require_login),
 ):
     tab = int(event_id)
@@ -3840,6 +4019,7 @@ async def ui_sysmon_table(
         order=order,
         page=page,
         page_size=page_size,
+        tag=tag,
     )
 
     return templates.TemplateResponse(
@@ -3857,6 +4037,7 @@ async def ui_sysmon_table(
             "q": q,
             "sort": sort,
             "order": order,
+            "tag": tag,
             "indicator_label": indicator_label,
             "indicator_field": indicator_field,
             "can_triage": can_triage(request),
