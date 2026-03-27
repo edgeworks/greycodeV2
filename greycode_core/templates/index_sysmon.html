@@ -9,7 +9,6 @@
         class="controls"
         hx-get="/ui/sysmon/{{ tab }}/table"
         hx-target="#tablewrap"
-        hx-push-url="true"
         hx-trigger="submit">
 
     <label>Search
@@ -150,4 +149,13 @@
       }, { once: true });
     })();
   </script>
+  <script>
+  document.body.addEventListener("htmx:configRequest", function (e) {
+    if (e.target && e.target.id === "filters") {
+      const params = new URLSearchParams(e.detail.parameters);
+      const newUrl = "/ui/sysmon/{{ tab }}?" + params.toString();
+      e.detail.headers["HX-Push-Url"] = newUrl;
+    }
+  });
+</script>
 {% endblock %}

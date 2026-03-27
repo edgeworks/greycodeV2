@@ -579,7 +579,7 @@ table.opstable thead th {
 }
 
 .col-sel { width: 44px; }
-.col-status { width: 180px; }
+.col-status { width: 220px; }
 .col-listing { width: 140px; }
 .col-count { width: 90px; }
 .col-lastseen { width: 255px; }

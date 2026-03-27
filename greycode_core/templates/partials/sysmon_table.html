@@ -1,4 +1,29 @@
 <section class="card">
+  {% macro page_url(page_value, sort_value=sort, order_value=order) -%}
+    /ui/sysmon/{{ tab }}?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort_value }}&order={{ order_value }}&page_size={{ page_size }}&page={{ page_value }}
+  {%- endmacro %}
+
+  {% macro table_url(page_value, sort_value=sort, order_value=order) -%}
+    /ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort_value }}&order={{ order_value }}&page_size={{ page_size }}&page={{ page_value }}
+  {%- endmacro %}
+
+  {% macro sort_link(label, key) -%}
+    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+    {% if key == "rare" %}
+      {% set next_order = "desc" if sort == key and order == "asc" else "asc" %}
+    {% endif %}
+    <a class="sortlink"
+       href="{{ page_url(1, key, next_order) }}"
+       hx-get="{{ table_url(1, key, next_order) }}"
+       hx-target="#tablewrap"
+       hx-push-url="{{ page_url(1, key, next_order) }}">
+      <span>{{ label }}</span>
+      {% if sort == key %}
+        <span class="sort-ind">{{ "↑" if order == "asc" else "↓" }}</span>
+      {% endif %}
+    </a>
+  {%- endmacro %}
+
   <div class="tablemeta">
     <p class="muted" style="margin:0;">
       Results: <b>{{ total }}</b> • Page {{ page }}
@@ -8,7 +33,6 @@
     </p>
 
     <div style="display:flex; gap:10px; align-items:center;">
-
       {% if can_triage %}
       <div class="bulkmeta">
         <span class="selbadge" id="selBadge" hidden>
@@ -58,22 +82,6 @@
     <input type="hidden" name="ticket_id" id="bulkTicketId" value="">
     <input type="hidden" name="return_to" value="{{ request.url }}">
 
-    {% macro sort_link(label, key) -%}
-      {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
-      {% if key == "rare" %}
-        {% set next_order = "desc" if sort == key and order == "asc" else "asc" %}
-      {% endif %}
-      <a class="sortlink" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ key }}&order={{ next_order }}&page=1&page_size={{ page_size }}"
-         hx-target="#tablewrap"
-         hx-push-url="true">
-        <span>{{ label }}</span>
-        {% if sort == key %}
-          <span class="sort-ind">{{ "↑" if order == "asc" else "↓" }}</span>
-        {% endif %}
-      </a>
-    {%- endmacro %}
-
     <table>
       <thead>
         <tr>
@@ -94,10 +102,6 @@
             <th class="col-computer">Computer</th>
             <th class="col-image">Image</th>
             <th class="col-sha">{{ indicator_label }}</th>
-          {% elif tab == 3 %}
-            <th class="col-computer">Computer (first/last)</th>
-            <th class="col-indicator">{{ indicator_label }}</th>
-            <th class="col-source">Source</th>
           {% else %}
             <th class="col-computer">Computer (first/last)</th>
             <th class="col-indicator">{{ indicator_label }}</th>
@@ -173,6 +177,7 @@
             {% if tab == 1 and row.status == "GREY" %}
               <span class="badge vt-{{ (row.vt_state or 'PENDING')|lower }}">{{ row.vt_state or "PENDING" }}</span>
             {% endif %}
+
             {% if row.tags %}
               {% for t in row.tags[:2] %}
                 <span class="badge tag-badge">{{ t }}</span>
@@ -229,19 +234,21 @@
 
   <div class="pager">
     {% if page > 1 %}
-      <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page-1 }}"
+      <a class="btn"
+         href="{{ page_url(page - 1) }}"
+         hx-get="{{ table_url(page - 1) }}"
          hx-target="#tablewrap"
-         hx-push-url="true">Prev</a>
+         hx-push-url="{{ page_url(page - 1) }}">Prev</a>
     {% endif %}
 
     <span class="muted">Page {{ page }}</span>
 
     {% if page * page_size < total %}
-      <a class="btn" href="#"
-         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page_size={{ page_size }}&page={{ page+1 }}"
+      <a class="btn"
+         href="{{ page_url(page + 1) }}"
+         hx-get="{{ table_url(page + 1) }}"
          hx-target="#tablewrap"
-         hx-push-url="true">Next</a>
+         hx-push-url="{{ page_url(page + 1) }}">Next</a>
     {% endif %}
   </div>
 </section>
