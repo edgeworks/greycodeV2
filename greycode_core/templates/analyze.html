@@ -47,20 +47,27 @@
     </details>
 
     <form class="analyze-upload-form"
-          hx-post="/ui/analyze/upload"
-          hx-target="#analyzeResults"
-          hx-swap="innerHTML"
-          enctype="multipart/form-data">
+        hx-post="/ui/analyze/upload"
+        hx-target="#analyzeResults"
+        hx-swap="innerHTML"
+        enctype="multipart/form-data">
 
-      <div class="analyze-upload-row">
+    <div class="analyze-upload-row">
         <input type="file" name="upload" accept=".json,.ndjson,.txt" required>
         <button class="btn primary" type="submit">Compare</button>
-      </div>
+    </div>
 
-      <label class="analyze-check">
+    <div class="analyze-upload-row">
+        <label class="analyze-check">
         <input type="checkbox" name="apply_manual_filters" value="1" checked>
         <span>Apply Greycode filters</span>
-      </label>
+        </label>
+
+        <label class="analyze-inline-field">
+        <span>Rare threshold</span>
+        <input type="number" name="rare_threshold" value="10" min="1" max="100000" step="1">
+        </label>
+    </div>
     </form>
   </section>
 

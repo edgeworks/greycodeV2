@@ -21,12 +21,13 @@
     <span class="chip">Parsed: {{ summary.parsed }}</span>
     <span class="chip">Ignored: {{ summary.ignored }}</span>
     <span class="chip">Filters: {{ "ON" if summary.apply_manual_filters else "OFF" }}</span>
+    <span class="chip">Rare ≤ {{ summary.rare_threshold }}</span>
 
     {% if summary.apply_manual_filters %}
-      <span class="chip">Filtered out: {{ summary.filtered_total }}</span>
-      <span class="chip">S1 filtered: {{ summary.filtered_sysmon1 }}</span>
-      <span class="chip">S3 filtered: {{ summary.filtered_sysmon3 }}</span>
-      <span class="chip">S22 filtered: {{ summary.filtered_sysmon22 }}</span>
+        <span class="chip">Filtered out: {{ summary.filtered_total }}</span>
+        <span class="chip">S1 filtered: {{ summary.filtered_sysmon1 }}</span>
+        <span class="chip">S3 filtered: {{ summary.filtered_sysmon3 }}</span>
+        <span class="chip">S22 filtered: {{ summary.filtered_sysmon22 }}</span>
     {% endif %}
 
     <span class="chip">Sysmon 1: {{ summary.sysmon1 }}</span>

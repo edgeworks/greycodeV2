@@ -649,6 +649,23 @@ label.switch {
   word-break: break-word;
 }
 
+.analyze-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.analyze-inline-field input[type="number"] {
+  width: 100px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
 .badge.match-new {
   background: var(--warning-soft);
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));

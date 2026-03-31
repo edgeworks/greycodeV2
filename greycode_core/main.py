@@ -876,6 +876,16 @@ def _safe_int(v: Any, default: int = 0) -> int:
     except Exception:
         return default
 
+def _safe_threshold(v: Any, default: int = 10, lo: int = 1, hi: int = 100000) -> int:
+    try:
+        n = int(v)
+        if n < lo:
+            return lo
+        if n > hi:
+            return hi
+        return n
+    except Exception:
+        return default
 
 def _analysis_sort_rank(match_class: str) -> int:
     order = {
@@ -888,7 +898,14 @@ def _analysis_sort_rank(match_class: str) -> int:
     return order.get((match_class or "").upper(), 99)
 
 
-def derive_match_class(*, found: bool, status: str = "", listing_state: str = "", count_total: int = 0) -> str:
+def derive_match_class(
+    *,
+    found: bool,
+    status: str = "",
+    listing_state: str = "",
+    count_total: int = 0,
+    rare_threshold: int = 10,
+) -> str:
     if not found:
         return "NEW_TO_ORG"
 
@@ -901,7 +918,7 @@ def derive_match_class(*, found: bool, status: str = "", listing_state: str = ""
     if listing_u == "LISTED":
         return "LISTED"
 
-    if count_total <= 3:
+    if count_total <= max(1, int(rare_threshold)):
         return "RARE_IN_ORG"
 
     return "KNOWN_IN_ORG"
@@ -996,6 +1013,10 @@ def aggregate_analysis_rows(
 
     mf = manual_filters or []
 
+    image_filters = [f for f in mf if (f.get("kind") or "").lower() == "image"]
+    ip_filters = [f for f in mf if (f.get("kind") or "").lower() == "ip"]
+    domain_filters = [f for f in mf if (f.get("kind") or "").lower() == "domain"]
+
     for obj in rows:
         event_code = str(obj.get("EventCode") or "").strip()
         ts = (obj.get("_time") or "").strip()
@@ -1009,7 +1030,7 @@ def aggregate_analysis_rows(
             if not indicator:
                 continue
 
-            if apply_manual_filters and image and value_matches_any_manual_filter(mf, "image", image):
+            if apply_manual_filters and image and value_matches_any_manual_filter(image_filters, "image", image):
                 filter_stats["filtered_total"] += 1
                 filter_stats["filtered_sysmon1"] += 1
                 continue
@@ -1049,7 +1070,7 @@ def aggregate_analysis_rows(
             except ValueError:
                 continue
 
-            if apply_manual_filters and value_matches_any_manual_filter(mf, "ip", indicator):
+            if apply_manual_filters and value_matches_any_manual_filter(ip_filters, "ip", indicator):
                 filter_stats["filtered_total"] += 1
                 filter_stats["filtered_sysmon3"] += 1
                 continue
@@ -1085,7 +1106,7 @@ def aggregate_analysis_rows(
             if not indicator:
                 continue
 
-            if apply_manual_filters and value_matches_any_manual_filter(mf, "domain", indicator):
+            if apply_manual_filters and value_matches_any_manual_filter(domain_filters, "domain", indicator):
                 filter_stats["filtered_total"] += 1
                 filter_stats["filtered_sysmon22"] += 1
                 continue
@@ -1115,7 +1136,12 @@ def aggregate_analysis_rows(
     return out, filter_stats
 
 
-async def compare_analysis_bucket(kind: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def compare_analysis_bucket(
+    kind: str,
+    rows: list[dict[str, Any]],
+    *,
+    rare_threshold: int = 10,
+) -> list[dict[str, Any]]:
     if not rows:
         return []
 
@@ -1141,6 +1167,7 @@ async def compare_analysis_bucket(kind: str, rows: list[dict[str, Any]]) -> list
             status=status,
             listing_state=listing_state,
             count_total=count_total,
+            rare_threshold=rare_threshold,
         )
 
         compared.append({
@@ -4215,6 +4242,7 @@ async def ui_analyze_upload(
     request: Request,
     upload: UploadFile = File(...),
     apply_manual_filters: str = Form("0"),
+    rare_threshold: str = Form("10"),
     _auth=Depends(require_login),
 ):
     raw_bytes = await upload.read()
@@ -4223,6 +4251,8 @@ async def ui_analyze_upload(
     parsed_rows, stats = parse_analysis_upload_text(body_text)
 
     apply_filters_bool = str(apply_manual_filters) == "1"
+    rare_threshold_value = _safe_threshold(rare_threshold, default=10)
+
     manual_filters = await load_manual_filters() if apply_filters_bool else []
 
     aggregated, filter_stats = aggregate_analysis_rows(
@@ -4235,9 +4265,9 @@ async def ui_analyze_upload(
     sysmon3_rows = list(aggregated["ip"].values())
     sysmon22_rows = list(aggregated["domain"].values())
 
-    sysmon1 = await compare_analysis_bucket("sha256", sysmon1_rows)
-    sysmon3 = await compare_analysis_bucket("ip", sysmon3_rows)
-    sysmon22 = await compare_analysis_bucket("domain", sysmon22_rows)
+    sysmon1 = await compare_analysis_bucket("sha256", sysmon1_rows, rare_threshold=rare_threshold_value)
+    sysmon3 = await compare_analysis_bucket("ip", sysmon3_rows, rare_threshold=rare_threshold_value)
+    sysmon22 = await compare_analysis_bucket("domain", sysmon22_rows, rare_threshold=rare_threshold_value)
 
     summary = {
         "received": stats["received"],
@@ -4248,6 +4278,7 @@ async def ui_analyze_upload(
         "filtered_sysmon3": filter_stats["filtered_sysmon3"],
         "filtered_sysmon22": filter_stats["filtered_sysmon22"],
         "apply_manual_filters": apply_filters_bool,
+        "rare_threshold": rare_threshold_value,
         "sysmon1": len(sysmon1),
         "sysmon3": len(sysmon3),
         "sysmon22": len(sysmon22),
