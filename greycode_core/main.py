@@ -925,7 +925,6 @@ def parse_analysis_upload_text(body_text: str) -> tuple[list[dict[str, Any]], di
     parsed_rows: list[dict[str, Any]] = []
     stats = {"received": 0, "parsed": 0, "ignored": 0}
 
-    # first try full JSON
     try:
         parsed = json.loads(body_text)
 
@@ -953,7 +952,6 @@ def parse_analysis_upload_text(body_text: str) -> tuple[list[dict[str, Any]], di
     except Exception:
         pass
 
-    # fallback: NDJSON / line-delimited Splunk export
     for line in body_text.splitlines():
         line = line.strip()
         if not line:
@@ -977,12 +975,26 @@ def parse_analysis_upload_text(body_text: str) -> tuple[list[dict[str, Any]], di
     return parsed_rows, stats
 
 
-def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+def aggregate_analysis_rows(
+    rows: list[dict[str, Any]],
+    *,
+    manual_filters: list[dict[str, str]] | None = None,
+    apply_manual_filters: bool = True,
+) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, int]]:
     out: dict[str, dict[str, dict[str, Any]]] = {
         "sha256": {},
         "ip": {},
         "domain": {},
     }
+
+    filter_stats = {
+        "filtered_total": 0,
+        "filtered_sysmon1": 0,
+        "filtered_sysmon3": 0,
+        "filtered_sysmon22": 0,
+    }
+
+    mf = manual_filters or []
 
     for obj in rows:
         event_code = str(obj.get("EventCode") or "").strip()
@@ -995,6 +1007,11 @@ def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, d
         if event_code == "1":
             indicator = (obj.get("sha256") or "").strip().upper()
             if not indicator:
+                continue
+
+            if apply_manual_filters and image and value_matches_any_manual_filter(mf, "image", image):
+                filter_stats["filtered_total"] += 1
+                filter_stats["filtered_sysmon1"] += 1
                 continue
 
             bucket = out["sha256"]
@@ -1032,6 +1049,11 @@ def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, d
             except ValueError:
                 continue
 
+            if apply_manual_filters and value_matches_any_manual_filter(mf, "ip", indicator):
+                filter_stats["filtered_total"] += 1
+                filter_stats["filtered_sysmon3"] += 1
+                continue
+
             bucket = out["ip"]
             row = bucket.get(indicator)
             if row is None:
@@ -1063,6 +1085,11 @@ def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, d
             if not indicator:
                 continue
 
+            if apply_manual_filters and value_matches_any_manual_filter(mf, "domain", indicator):
+                filter_stats["filtered_total"] += 1
+                filter_stats["filtered_sysmon22"] += 1
+                continue
+
             bucket = out["domain"]
             row = bucket.get(indicator)
             if row is None:
@@ -1085,7 +1112,7 @@ def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, d
                 if image:
                     row["image"] = image
 
-    return out
+    return out, filter_stats
 
 
 async def compare_analysis_bucket(kind: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4168,7 +4195,6 @@ async def list_hashes(
         "results": results,
     }
 
-
 @app.get("/ui/analyze", response_class=HTMLResponse)
 async def ui_analyze(request: Request, _auth=Depends(require_login)):
     return templates.TemplateResponse(
@@ -4188,13 +4214,22 @@ async def ui_analyze(request: Request, _auth=Depends(require_login)):
 async def ui_analyze_upload(
     request: Request,
     upload: UploadFile = File(...),
+    apply_manual_filters: str = Form("0"),
     _auth=Depends(require_login),
 ):
     raw_bytes = await upload.read()
     body_text = raw_bytes.decode("utf-8", errors="replace")
 
     parsed_rows, stats = parse_analysis_upload_text(body_text)
-    aggregated = aggregate_analysis_rows(parsed_rows)
+
+    apply_filters_bool = str(apply_manual_filters) == "1"
+    manual_filters = await load_manual_filters() if apply_filters_bool else []
+
+    aggregated, filter_stats = aggregate_analysis_rows(
+        parsed_rows,
+        manual_filters=manual_filters,
+        apply_manual_filters=apply_filters_bool,
+    )
 
     sysmon1_rows = list(aggregated["sha256"].values())
     sysmon3_rows = list(aggregated["ip"].values())
@@ -4208,6 +4243,11 @@ async def ui_analyze_upload(
         "received": stats["received"],
         "parsed": stats["parsed"],
         "ignored": stats["ignored"],
+        "filtered_total": filter_stats["filtered_total"],
+        "filtered_sysmon1": filter_stats["filtered_sysmon1"],
+        "filtered_sysmon3": filter_stats["filtered_sysmon3"],
+        "filtered_sysmon22": filter_stats["filtered_sysmon22"],
+        "apply_manual_filters": apply_filters_bool,
         "sysmon1": len(sysmon1),
         "sysmon3": len(sysmon3),
         "sysmon22": len(sysmon22),
@@ -4234,8 +4274,6 @@ async def ui_analyze_upload(
             "sysmon22": sysmon22,
         },
     )
-
-
 
 
 @app.get("/ui", response_class=HTMLResponse)

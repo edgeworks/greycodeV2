@@ -11,13 +11,15 @@
       against the existing Greycode dataset. Imported data is not stored in Greycode.
     </p>
 
-    <div class="analyze-hint">
-      <div><b>Splunk query hint</b></div>
-      <div class="muted" style="margin-top:6px;">
-        Use a normalized export with the fields below and then export as JSON.
-        Greycode also accepts the Splunk wrapper format with <span class="mono">{"result": {...}}</span>.
-      </div>
-      <pre>index=wef Computer="HOSTNAME" (EventCode=1 OR EventCode=3 OR EventCode=22)
+    <details class="analyze-help">
+      <summary>Splunk query hint</summary>
+      <div class="analyze-help-body">
+        <div class="muted">
+          Use a normalized export with the fields below and then export as JSON.
+          Greycode also accepts the Splunk wrapper format with
+          <span class="mono">{"result": {...}}</span>.
+        </div>
+        <pre>index=wef Computer="HOSTNAME" (EventCode=1 OR EventCode=3 OR EventCode=22)
 | eval sha256=coalesce(
     sha256,
     mvindex(split(mvindex(split(Hashes,"SHA256="),1),","),0)
@@ -30,26 +32,35 @@
 | eval Computer=coalesce(Computer, host)
 | table EventCode _time Computer Image CommandLine sha256 DestinationIp DestinationPort QueryName
 | sort 0 _time</pre>
-    </div>
-
-    <div class="analyze-hint">
-      <div><b>Supported JSON</b></div>
-      <div class="muted" style="margin-top:6px;">
-        Accepted formats:
-        plain JSON objects, JSON arrays, NDJSON, and Splunk export lines with
-        <span class="mono">{"preview":false,"result":{...}}</span>.
       </div>
-    </div>
+    </details>
+
+    <details class="analyze-help">
+      <summary>Supported JSON</summary>
+      <div class="analyze-help-body">
+        <div class="muted">
+          Accepted formats:
+          plain JSON objects, JSON arrays, NDJSON, and Splunk export lines with
+          <span class="mono">{"preview":false,"result":{...}}</span>.
+        </div>
+      </div>
+    </details>
 
     <form class="analyze-upload-form"
           hx-post="/ui/analyze/upload"
           hx-target="#analyzeResults"
           hx-swap="innerHTML"
           enctype="multipart/form-data">
+
       <div class="analyze-upload-row">
         <input type="file" name="upload" accept=".json,.ndjson,.txt" required>
         <button class="btn primary" type="submit">Compare</button>
       </div>
+
+      <label class="analyze-check">
+        <input type="checkbox" name="apply_manual_filters" value="1" checked>
+        <span>Apply Greycode filters</span>
+      </label>
     </form>
   </section>
 

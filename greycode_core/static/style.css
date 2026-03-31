@@ -545,26 +545,6 @@ label.switch {
   gap: 16px;
 }
 
-.analyze-hint {
-  margin-top: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--card2);
-}
-
-.analyze-hint pre {
-  margin: 10px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  color: var(--text);
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .analyze-upload-form {
   display: flex;
   flex-direction: column;
@@ -584,6 +564,14 @@ label.switch {
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--text);
+}
+
+.analyze-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .analyze-summary {
@@ -612,6 +600,53 @@ label.switch {
 
 .analyze-indicator {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.analyze-help {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card2);
+  overflow: hidden;
+}
+
+.analyze-help summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 700;
+  color: var(--text);
+  user-select: none;
+}
+
+.analyze-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.analyze-help summary::after {
+  content: "▾";
+  float: right;
+  color: var(--muted);
+  transition: transform 140ms ease;
+}
+
+.analyze-help[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.analyze-help-body {
+  padding: 0 14px 14px;
+}
+
+.analyze-help pre {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .badge.match-new {
