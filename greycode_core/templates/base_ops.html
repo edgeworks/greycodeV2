@@ -68,15 +68,21 @@
       </div>
     </header>
 
-    <div class="ops-toolbar">
-      <div class="ops-toolbar-inner">
+    <div class="ops-toolbar-inner">
+      <div class="ops-nav-group">
         <nav class="ops-tabs" aria-label="Sysmon tabs">
           <a href="/ui/sysmon/1" class="{% if tab==1 %}active{% endif %}">Sysmon 1</a>
           <a href="/ui/sysmon/3" class="{% if tab==3 %}active{% endif %}">Sysmon 3</a>
           <a href="/ui/sysmon/22" class="{% if tab==22 %}active{% endif %}">Sysmon 22</a>
         </nav>
 
-        <div class="ops-chips">
+        <a href="/ui/analyze"
+          class="ops-workspace-link {% if tab == 'analyze' %}active{% endif %}">
+          Analyze
+        </a>
+      </div>
+
+      <div class="ops-chips">
           {% if vt_enabled %}
             <span class="chip">VT enabled</span>
           {% else %}

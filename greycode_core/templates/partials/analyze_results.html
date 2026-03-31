@@ -1,0 +1,200 @@
+{% macro match_badge(row) -%}
+  {% if row.match_class == "NEW_TO_ORG" %}
+    <span class="badge match-new">NEW_TO_ORG</span>
+  {% elif row.match_class == "RARE_IN_ORG" %}
+    <span class="badge match-rare">RARE_IN_ORG</span>
+  {% elif row.match_class == "KNOWN_IN_ORG" %}
+    <span class="badge match-known">KNOWN_IN_ORG</span>
+  {% elif row.match_class == "LISTED" %}
+    <span class="badge match-listed">LISTED</span>
+  {% elif row.match_class == "RED" %}
+    <span class="badge match-red">RED</span>
+  {% else %}
+    <span class="badge">{{ row.match_class }}</span>
+  {% endif %}
+{%- endmacro %}
+
+<section class="card">
+  <h2 style="margin-top:0;">Import summary</h2>
+  <div class="analyze-summary">
+    <span class="chip">Received: {{ summary.received }}</span>
+    <span class="chip">Parsed: {{ summary.parsed }}</span>
+    <span class="chip">Ignored: {{ summary.ignored }}</span>
+    <span class="chip">Sysmon 1: {{ summary.sysmon1 }}</span>
+    <span class="chip">Sysmon 3: {{ summary.sysmon3 }}</span>
+    <span class="chip">Sysmon 22: {{ summary.sysmon22 }}</span>
+  </div>
+</section>
+
+<section class="card">
+  <div class="analyze-table-title">
+    <h2 style="margin:0;">Sysmon 1 • Hash comparison</h2>
+    <span class="muted">{{ sysmon1|length }} unique indicators</span>
+  </div>
+
+  {% if sysmon1 %}
+    <table class="opstable">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>SHA256</th>
+          <th>Upload count</th>
+          <th>Upload last seen</th>
+          <th>Computer</th>
+          <th>Image</th>
+          <th>Greycode status</th>
+          <th>VT</th>
+          <th>Org count</th>
+          <th>Org last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in sysmon1 %}
+        <tr>
+          <td>{{ match_badge(row) }}</td>
+          <td class="analyze-indicator" title="{{ row.indicator }}">{{ row.indicator }}</td>
+          <td class="num">{{ row.upload_count }}</td>
+          <td class="mono">{{ row.upload_last_seen or "-" }}</td>
+          <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+          <td class="mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+          <td>
+            {% if row.found %}
+              <span class="badge status-{{ (row.status or 'grey')|lower }}">{{ row.status or "GREY" }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if row.found %}
+              <span class="badge vt-{{ (row.vt_state or 'pending')|lower }}">{{ row.vt_state or "-" }}</span>
+              {% if row.vt_malicious and row.vt_malicious|int > 0 %}
+                <span class="badge vtred">{{ row.vt_malicious }}</span>
+              {% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="num">{{ row.org_count_total if row.found else "-" }}</td>
+          <td class="mono">{{ row.org_last_seen if row.found else "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="analyze-empty">No Sysmon 1 indicators found in the uploaded file.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="analyze-table-title">
+    <h2 style="margin:0;">Sysmon 3 • IP comparison</h2>
+    <span class="muted">{{ sysmon3|length }} unique indicators</span>
+  </div>
+
+  {% if sysmon3 %}
+    <table class="opstable">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Destination IP</th>
+          <th>Upload count</th>
+          <th>Upload last seen</th>
+          <th>Computer</th>
+          <th>Image</th>
+          <th>Port</th>
+          <th>Greycode status</th>
+          <th>Listing</th>
+          <th>Org count</th>
+          <th>Org last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in sysmon3 %}
+        <tr>
+          <td>{{ match_badge(row) }}</td>
+          <td class="analyze-indicator">{{ row.indicator }}</td>
+          <td class="num">{{ row.upload_count }}</td>
+          <td class="mono">{{ row.upload_last_seen or "-" }}</td>
+          <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+          <td class="mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+          <td class="mono">{{ row.destination_port or "-" }}</td>
+          <td>
+            {% if row.found %}
+              <span class="badge status-{{ (row.status or 'grey')|lower }}">{{ row.status or "GREY" }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if row.found and row.listing_state %}
+              <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="num">{{ row.org_count_total if row.found else "-" }}</td>
+          <td class="mono">{{ row.org_last_seen if row.found else "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="analyze-empty">No Sysmon 3 indicators found in the uploaded file.</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <div class="analyze-table-title">
+    <h2 style="margin:0;">Sysmon 22 • Domain comparison</h2>
+    <span class="muted">{{ sysmon22|length }} unique indicators</span>
+  </div>
+
+  {% if sysmon22 %}
+    <table class="opstable">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>QueryName</th>
+          <th>Upload count</th>
+          <th>Upload last seen</th>
+          <th>Computer</th>
+          <th>Image</th>
+          <th>Greycode status</th>
+          <th>Listing</th>
+          <th>Org count</th>
+          <th>Org last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in sysmon22 %}
+        <tr>
+          <td>{{ match_badge(row) }}</td>
+          <td class="analyze-indicator">{{ row.indicator }}</td>
+          <td class="num">{{ row.upload_count }}</td>
+          <td class="mono">{{ row.upload_last_seen or "-" }}</td>
+          <td title="{{ row.computer }}">{{ row.computer or "-" }}</td>
+          <td class="mono" title="{{ row.image }}">{{ row.image or "-" }}</td>
+          <td>
+            {% if row.found %}
+              <span class="badge status-{{ (row.status or 'grey')|lower }}">{{ row.status or "GREY" }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td>
+            {% if row.found and row.listing_state %}
+              <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="num">{{ row.org_count_total if row.found else "-" }}</td>
+          <td class="mono">{{ row.org_last_seen if row.found else "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="analyze-empty">No Sysmon 22 indicators found in the uploaded file.</div>
+  {% endif %}
+</section>

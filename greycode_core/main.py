@@ -1,5 +1,5 @@
 from hashlib import sha256
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi import Path as ApiPath
 from fastapi import Depends
 from fastapi import Request, HTTPException
@@ -867,6 +867,279 @@ def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: st
         "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
     }
     return row
+
+def _safe_int(v: Any, default: int = 0) -> int:
+    try:
+        if v is None or v == "":
+            return default
+        return int(v)
+    except Exception:
+        return default
+
+
+def _analysis_sort_rank(match_class: str) -> int:
+    order = {
+        "NEW_TO_ORG": 0,
+        "RED": 1,
+        "LISTED": 2,
+        "RARE_IN_ORG": 3,
+        "KNOWN_IN_ORG": 4,
+    }
+    return order.get((match_class or "").upper(), 99)
+
+
+def derive_match_class(*, found: bool, status: str = "", listing_state: str = "", count_total: int = 0) -> str:
+    if not found:
+        return "NEW_TO_ORG"
+
+    status_u = (status or "").upper()
+    listing_u = (listing_state or "").upper()
+
+    if status_u == "RED":
+        return "RED"
+
+    if listing_u == "LISTED":
+        return "LISTED"
+
+    if count_total <= 3:
+        return "RARE_IN_ORG"
+
+    return "KNOWN_IN_ORG"
+
+
+def _unwrap_analysis_obj(obj: Any) -> dict[str, Any] | None:
+    if not isinstance(obj, dict):
+        return None
+
+    if isinstance(obj.get("result"), dict):
+        return obj["result"]
+
+    return obj
+
+
+def parse_analysis_upload_text(body_text: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    body_text = (body_text or "").strip()
+    if not body_text:
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    parsed_rows: list[dict[str, Any]] = []
+    stats = {"received": 0, "parsed": 0, "ignored": 0}
+
+    # first try full JSON
+    try:
+        parsed = json.loads(body_text)
+
+        if isinstance(parsed, list):
+            for item in parsed:
+                stats["received"] += 1
+                obj = _unwrap_analysis_obj(item)
+                if obj is None:
+                    stats["ignored"] += 1
+                    continue
+                parsed_rows.append(obj)
+                stats["parsed"] += 1
+            return parsed_rows, stats
+
+        if isinstance(parsed, dict):
+            stats["received"] += 1
+            obj = _unwrap_analysis_obj(parsed)
+            if obj is None:
+                stats["ignored"] += 1
+            else:
+                parsed_rows.append(obj)
+                stats["parsed"] += 1
+            return parsed_rows, stats
+
+    except Exception:
+        pass
+
+    # fallback: NDJSON / line-delimited Splunk export
+    for line in body_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        stats["received"] += 1
+        try:
+            item = json.loads(line)
+        except Exception:
+            stats["ignored"] += 1
+            continue
+
+        obj = _unwrap_analysis_obj(item)
+        if obj is None:
+            stats["ignored"] += 1
+            continue
+
+        parsed_rows.append(obj)
+        stats["parsed"] += 1
+
+    return parsed_rows, stats
+
+
+def aggregate_analysis_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+    out: dict[str, dict[str, dict[str, Any]]] = {
+        "sha256": {},
+        "ip": {},
+        "domain": {},
+    }
+
+    for obj in rows:
+        event_code = str(obj.get("EventCode") or "").strip()
+        ts = (obj.get("_time") or "").strip()
+        computer = (obj.get("Computer") or "").strip()
+        image = (obj.get("Image") or "").strip()
+        commandline = (obj.get("CommandLine") or "").strip()
+        destination_port = str(obj.get("DestinationPort") or "").strip()
+
+        if event_code == "1":
+            indicator = (obj.get("sha256") or "").strip().upper()
+            if not indicator:
+                continue
+
+            bucket = out["sha256"]
+            row = bucket.get(indicator)
+            if row is None:
+                bucket[indicator] = {
+                    "indicator": indicator,
+                    "upload_count": 1,
+                    "upload_first_seen": ts,
+                    "upload_last_seen": ts,
+                    "computer": computer,
+                    "image": image,
+                    "commandline": commandline,
+                }
+            else:
+                row["upload_count"] += 1
+                if ts and ((not row["upload_first_seen"]) or ts < row["upload_first_seen"]):
+                    row["upload_first_seen"] = ts
+                if ts and ((not row["upload_last_seen"]) or ts > row["upload_last_seen"]):
+                    row["upload_last_seen"] = ts
+                if computer:
+                    row["computer"] = computer
+                if image:
+                    row["image"] = image
+                if commandline:
+                    row["commandline"] = commandline
+
+        elif event_code == "3":
+            raw_ip = (obj.get("DestinationIp") or "").strip()
+            if not raw_ip:
+                continue
+
+            try:
+                indicator = normalize_ip(raw_ip)
+            except ValueError:
+                continue
+
+            bucket = out["ip"]
+            row = bucket.get(indicator)
+            if row is None:
+                bucket[indicator] = {
+                    "indicator": indicator,
+                    "upload_count": 1,
+                    "upload_first_seen": ts,
+                    "upload_last_seen": ts,
+                    "computer": computer,
+                    "image": image,
+                    "destination_port": destination_port,
+                }
+            else:
+                row["upload_count"] += 1
+                if ts and ((not row["upload_first_seen"]) or ts < row["upload_first_seen"]):
+                    row["upload_first_seen"] = ts
+                if ts and ((not row["upload_last_seen"]) or ts > row["upload_last_seen"]):
+                    row["upload_last_seen"] = ts
+                if computer:
+                    row["computer"] = computer
+                if image:
+                    row["image"] = image
+                if destination_port:
+                    row["destination_port"] = destination_port
+
+        elif event_code == "22":
+            raw_domain = (obj.get("QueryName") or "").strip()
+            indicator = normalize_domain(raw_domain)
+            if not indicator:
+                continue
+
+            bucket = out["domain"]
+            row = bucket.get(indicator)
+            if row is None:
+                bucket[indicator] = {
+                    "indicator": indicator,
+                    "upload_count": 1,
+                    "upload_first_seen": ts,
+                    "upload_last_seen": ts,
+                    "computer": computer,
+                    "image": image,
+                }
+            else:
+                row["upload_count"] += 1
+                if ts and ((not row["upload_first_seen"]) or ts < row["upload_first_seen"]):
+                    row["upload_first_seen"] = ts
+                if ts and ((not row["upload_last_seen"]) or ts > row["upload_last_seen"]):
+                    row["upload_last_seen"] = ts
+                if computer:
+                    row["computer"] = computer
+                if image:
+                    row["image"] = image
+
+    return out
+
+
+async def compare_analysis_bucket(kind: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+
+    pipe = r.pipeline()
+    for row in rows:
+        pipe.hgetall(record_key_for_kind(kind, row["indicator"]))
+    raw = await pipe.execute()
+
+    compared: list[dict[str, Any]] = []
+
+    for row, found_data in zip(rows, raw):
+        data = found_data or {}
+        found = bool(data)
+
+        status = (data.get("status") or "GREY").upper() if found else ""
+        listing_state = (data.get("listing_state") or "").upper() if found else ""
+        vt_state = (data.get("vt_state") or "").upper() if found else ""
+        vt_malicious = _safe_int(data.get("vt_malicious"), 0) if found else 0
+        count_total = _safe_int(data.get("count_total"), 0) if found else 0
+
+        match_class = derive_match_class(
+            found=found,
+            status=status,
+            listing_state=listing_state,
+            count_total=count_total,
+        )
+
+        compared.append({
+            **row,
+            "found": found,
+            "match_class": match_class,
+            "status": status,
+            "listing_state": listing_state,
+            "vt_state": vt_state,
+            "vt_malicious": vt_malicious,
+            "org_count_total": count_total,
+            "org_first_seen": data.get("first_seen") or "",
+            "org_last_seen": data.get("last_seen") or "",
+            "org_source": data.get("source") or "",
+            "org_disposition": (data.get("disposition") or "").upper(),
+            "org_ticket_id": data.get("ticket_id") or "",
+        })
+
+    compared.sort(
+        key=lambda x: (
+            _analysis_sort_rank(x.get("match_class") or ""),
+            -int(x.get("upload_count") or 0),
+            x.get("indicator") or "",
+        )
+    )
+    return compared
 
 
 def row_matches_q(tab: int, row: dict[str, Any], q_lower: str) -> bool:
@@ -3894,6 +4167,75 @@ async def list_hashes(
         "count": len(results),
         "results": results,
     }
+
+
+@app.get("/ui/analyze", response_class=HTMLResponse)
+async def ui_analyze(request: Request, _auth=Depends(require_login)):
+    return templates.TemplateResponse(
+        "analyze.html",
+        {
+            "request": request,
+            "tab": "analyze",
+            "theme": await current_user_theme(request),
+            "vt_enabled": await vt_enabled_setting(),
+            "initial_message": "No file uploaded yet.",
+            **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.post("/ui/analyze/upload", response_class=HTMLResponse)
+async def ui_analyze_upload(
+    request: Request,
+    upload: UploadFile = File(...),
+    _auth=Depends(require_login),
+):
+    raw_bytes = await upload.read()
+    body_text = raw_bytes.decode("utf-8", errors="replace")
+
+    parsed_rows, stats = parse_analysis_upload_text(body_text)
+    aggregated = aggregate_analysis_rows(parsed_rows)
+
+    sysmon1_rows = list(aggregated["sha256"].values())
+    sysmon3_rows = list(aggregated["ip"].values())
+    sysmon22_rows = list(aggregated["domain"].values())
+
+    sysmon1 = await compare_analysis_bucket("sha256", sysmon1_rows)
+    sysmon3 = await compare_analysis_bucket("ip", sysmon3_rows)
+    sysmon22 = await compare_analysis_bucket("domain", sysmon22_rows)
+
+    summary = {
+        "received": stats["received"],
+        "parsed": stats["parsed"],
+        "ignored": stats["ignored"],
+        "sysmon1": len(sysmon1),
+        "sysmon3": len(sysmon3),
+        "sysmon22": len(sysmon22),
+    }
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="analysis",
+        action="upload_compare",
+        target_kind="file",
+        target=upload.filename or "upload",
+        details=summary,
+    )
+
+    return templates.TemplateResponse(
+        "partials/analyze_results.html",
+        {
+            "request": request,
+            "summary": summary,
+            "sysmon1": sysmon1,
+            "sysmon3": sysmon3,
+            "sysmon22": sysmon22,
+        },
+    )
+
+
 
 
 @app.get("/ui", response_class=HTMLResponse)
