@@ -109,8 +109,6 @@ async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
                 vendors=vendors,
             )
 
-            print(f"[recheck-debug] domain={dom} hits={hits}", flush=True)
-
             await update_indicator_record(
                 r,
                 alert_router,
@@ -127,13 +125,6 @@ async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
                 "alerted_listed_at",
                 "alerted_delisted_at",
                 "last_transition",
-            )
-            print(
-                f"[recheck-debug] domain={dom} post_update "
-                f"listing_state={data[0]!r} status={data[1]!r} "
-                f"alerted_listed_at={data[2]!r} alerted_delisted_at={data[3]!r} "
-                f"last_transition={data[4]!r}",
-                flush=True,
             )
 
             await sync_domain_indexes(r, dom)
