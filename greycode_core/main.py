@@ -736,8 +736,9 @@ async def render_blacklist_settings_modal(
 ) -> HTMLResponse:
     s = await load_settings()
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": saved,
@@ -1669,8 +1670,9 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
     parsed_tags = parse_tags_field(data.get("tags") or "")
 
     return templates.TemplateResponse(
-        "partials/sysmon_drawer.html",
-        {
+        request,
+        name="partials/sysmon_drawer.html",
+        context={
             "request": request,
             "tab": tab,
             "indicator": indicator,
@@ -1762,8 +1764,9 @@ Greycode
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, err: str = "", next: str = "/ui"):
     return templates.TemplateResponse(
-        "login.html",
-        {
+        request,
+        name="login.html",
+        context={
             "request": request,
             "err": err,
             "next": next,
@@ -1810,8 +1813,9 @@ async def logout(request: Request):
 async def ui_settings(request: Request, saved: str = "", _auth=Depends(require_login)):
     s = await load_settings()
     return templates.TemplateResponse(
-        "settings.html",
-        {
+        request,
+        name="settings.html",
+        context={
             "request": request,
             "tab": 0,
             "settings": s,
@@ -1840,8 +1844,9 @@ async def ui_settings_tab(
 ):
     s = await load_settings()
     return templates.TemplateResponse(
-        settings_partial_for(tab_name),
-        {
+        request,
+        name=settings_partial_for(tab_name),
+        context={
             "request": request,
             "settings": s,
         },
@@ -1945,8 +1950,9 @@ async def ui_settings_blacklist(request: Request, _auth=Depends(require_login)):
 
     s = await load_settings()
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": "blacklist",
@@ -1994,8 +2000,9 @@ async def ui_vendor_fetch_now(
     s = await load_settings()
 
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": f"fetch:{vendor_key}",
@@ -2067,8 +2074,9 @@ async def ui_vendor_preview(
     items = sorted(items)
 
     return templates.TemplateResponse(
-        "partials/vendor_preview_modal.html",
-        {
+        request,
+        name="partials/vendor_preview_modal.html",
+        context={
             "request": request,
             "vendor": vendor,
             "items": items,
@@ -2136,8 +2144,9 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
 
     s = await load_settings()
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": "vt",
@@ -2355,8 +2364,9 @@ async def ui_users_create(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "user_created" if not err else "",
@@ -2409,8 +2419,9 @@ async def ui_users_resend_invite(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "invite_resent" if not err else "",
@@ -2456,8 +2467,9 @@ async def ui_users_delete(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "user_deleted" if not err else "",
@@ -2501,8 +2513,9 @@ async def ui_users_update_role(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "role_updated",
@@ -2516,8 +2529,9 @@ async def activate_account_page(request: Request, token: str = Query(""), err: s
     valid = bool(invite)
 
     return templates.TemplateResponse(
-        "activate_account.html",
-        {
+        request,
+        name="activate_account.html",
+        context={
             "request": request,
             "token": token,
             "valid": valid,
@@ -2537,8 +2551,9 @@ async def activate_account_submit(
     invite = await validate_invite_token(r, token)
     if not invite:
         return templates.TemplateResponse(
-            "activate_account.html",
-            {
+            request,
+            name="activate_account.html",
+            context={
                 "request": request,
                 "token": token,
                 "valid": False,
@@ -2549,8 +2564,9 @@ async def activate_account_submit(
 
     if len(password or "") < 10:
         return templates.TemplateResponse(
-            "activate_account.html",
-            {
+            request,
+            name="activate_account.html",
+            context={
                 "request": request,
                 "token": token,
                 "valid": True,
@@ -2561,8 +2577,9 @@ async def activate_account_submit(
 
     if password != password_confirm:
         return templates.TemplateResponse(
-            "activate_account.html",
-            {
+            request,
+            name="activate_account.html",
+            context={
                 "request": request,
                 "token": token,
                 "valid": True,
@@ -2574,8 +2591,9 @@ async def activate_account_submit(
     username = (invite.get("username") or "").strip().lower()
     if not username:
         return templates.TemplateResponse(
-            "activate_account.html",
-            {
+            request,
+            name="activate_account.html",
+            context={
                 "request": request,
                 "token": token,
                 "valid": False,
@@ -2642,8 +2660,9 @@ async def ui_users_update_active(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "active_updated" if not err else "",
@@ -2684,8 +2703,9 @@ async def ui_users_reset_password(
 
     users = await list_users(r)
     return templates.TemplateResponse(
-        "partials/settings_tab_users.html",
-        {
+        request,
+        name="partials/settings_tab_users.html",
+        context={
             "request": request,
             "users": users,
             "saved": "password_reset" if not err else "",
@@ -2752,8 +2772,9 @@ async def ui_settings_notifications(request: Request, _auth=Depends(require_logi
 
     s = await load_settings()
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": "notifications",
@@ -2776,8 +2797,9 @@ async def ui_settings_modal(
     audit_rows = await get_recent_audit(r, 100) if tab == "audit" else []
 
     return templates.TemplateResponse(
-        "partials/settings_modal.html",
-        {
+        request,
+        name="partials/settings_modal.html",
+        context={
             "request": request,
             "settings": s,
             "saved": saved,
@@ -2797,8 +2819,9 @@ async def ui_profile_modal(request: Request, saved: str = "", err: str = "", _au
     user = await get_user(r, uname)
 
     return templates.TemplateResponse(
-        "partials/profile_modal.html",
-        {
+        request,
+        name="partials/profile_modal.html",
+        context={
             "request": request,
             "user_profile": user,
             "saved": saved,
@@ -2834,8 +2857,9 @@ async def ui_profile_update(
 
     user = await get_user(r, uname)
     return templates.TemplateResponse(
-        "partials/profile_modal.html",
-        {
+        request,
+        name="partials/profile_modal.html",
+        context={
             "request": request,
             "user_profile": user,
             "saved": "profile",
@@ -2870,8 +2894,9 @@ async def ui_profile_password(
 
     user = await get_user(r, uname)
     return templates.TemplateResponse(
-        "partials/profile_modal.html",
-        {
+        request,
+        name="partials/profile_modal.html",
+        context={
             "request": request,
             "user_profile": user,
             "saved": "password" if not err else "",
@@ -4225,8 +4250,9 @@ async def list_hashes(
 @app.get("/ui/analyze", response_class=HTMLResponse)
 async def ui_analyze(request: Request, _auth=Depends(require_login)):
     return templates.TemplateResponse(
-        "analyze.html",
-        {
+        request,
+        name="analyze.html",
+        context={
             "request": request,
             "tab": "analyze",
             "theme": await current_user_theme(request),
@@ -4296,8 +4322,9 @@ async def ui_analyze_upload(
     )
 
     return templates.TemplateResponse(
-        "partials/analyze_results.html",
-        {
+        request,
+        name="partials/analyze_results.html",
+        context={
             "request": request,
             "summary": summary,
             "sysmon1": sysmon1,
@@ -4437,8 +4464,9 @@ async def ui_sysmon_table(
     )
 
     return templates.TemplateResponse(
-        "partials/sysmon_table.html",
-        {
+        request,
+        name="partials/sysmon_table.html",
+        context={
             "request": request,
             "tab": tab,
             "rows": rows,
@@ -4468,8 +4496,9 @@ async def ui_sysmon_spread_modal(
     vm = await build_spread_view_model(int(event_id))
 
     return templates.TemplateResponse(
-        "partials/sysmon_spread_modal.html",
-        {
+        request,
+        name="partials/sysmon_spread_modal.html",
+        context={
             "request": request,
             **vm,
         },
