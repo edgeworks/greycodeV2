@@ -4349,6 +4349,7 @@ async def ui_sysmon(
         status = "ALL"
 
     return templates.TemplateResponse(
+        request,
         name="index_sysmon.html",
         context={
             "request": request,
@@ -4369,7 +4370,9 @@ async def ui_sysmon(
             "can_delete": can_delete(request),
             "theme": await current_user_theme(request),
             "tag": tag,
-            "available_tags": await load_available_tags("sha256" if tab == 1 else "ip" if tab == 3 else "domain"),
+            "available_tags": await load_available_tags(
+                "sha256" if tab == 1 else "ip" if tab == 3 else "domain"
+            ),
             **(await get_ui_metrics()),
         },
     )
