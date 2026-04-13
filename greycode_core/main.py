@@ -4350,7 +4350,7 @@ async def ui_sysmon(
 
     return templates.TemplateResponse(
         "index_sysmon.html",
-        {
+        context={
             "request": request,
             "tab": tab,
             "status": status,
