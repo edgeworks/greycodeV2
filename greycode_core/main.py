@@ -75,11 +75,18 @@ from indexes import (
     update_listing_indexes,
     update_tag_indexes,
     remove_from_all_indexes,
+    idx_z_computer_noticeable_score,
+    idx_z_computer_last_seen,
+    idx_z_computer_rare_total,
+    idx_z_computer_rare_unknown_hash_count,
+    idx_z_computer_red_count,
+    idx_z_computer_listed_count,
 )
 from index_sync import (
     sync_sha256_indexes,
     sync_ip_indexes,
     sync_domain_indexes,
+    sync_computer_indexes,
 )
 
 import faulthandler
@@ -110,6 +117,10 @@ INDEX_DIRTY_IP_SET = "greycode:index_dirty:ip"
 INDEX_DIRTY_DOMAIN_SET = "greycode:index_dirty:domain"
 INDEX_DIRTY_SHA256_SET = "greycode:index_dirty:sha256"
 MANUAL_FILTERS_KEY = "greycode:cfg:manual_filters"
+KNOWN_COMPUTERS_SET = "greycode:known:computers"
+INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
+RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))
+
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -792,6 +803,108 @@ def normalize_domain(qname: str) -> str:
     if d.endswith("."):
         d = d[:-1]
     return d
+
+def normalize_computer(computer: str) -> str:
+    return (computer or "").strip().lower().rstrip(".")
+
+
+def computer_key(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}"
+
+
+def computer_indicator_set(computer: str, kind: str) -> str:
+    computer_norm = normalize_computer(computer)
+    if kind == "sha256":
+        return f"greycode:computer:{computer_norm}:sha256"
+    if kind == "ip":
+        return f"greycode:computer:{computer_norm}:ips"
+    if kind == "domain":
+        return f"greycode:computer:{computer_norm}:domains"
+    raise ValueError(f"Unknown computer indicator kind: {kind}")
+
+
+def computer_indicator_counts(computer: str, kind: str) -> str:
+    computer_norm = normalize_computer(computer)
+    if kind == "sha256":
+        return f"greycode:computer:{computer_norm}:sha256_counts"
+    if kind == "ip":
+        return f"greycode:computer:{computer_norm}:ip_counts"
+    if kind == "domain":
+        return f"greycode:computer:{computer_norm}:domain_counts"
+    raise ValueError(f"Unknown computer indicator kind: {kind}")
+
+
+def seen_by_computers_key(kind: str, indicator: str) -> str:
+    return f"greycode:seen_by:{kind}:{indicator}"
+
+
+def computer_event_counter_for_kind(kind: str) -> str:
+    if kind == "sha256":
+        return "event_count_sysmon1"
+    if kind == "ip":
+        return "event_count_sysmon3"
+    if kind == "domain":
+        return "event_count_sysmon22"
+    raise ValueError(f"Unknown computer event kind: {kind}")
+
+
+async def update_computer_observations(
+    observations: list[dict[str, Any]],
+    *,
+    seen_at: str,
+) -> None:
+    """
+    Forward-only computer profiling.
+
+    observations item shape:
+      {
+        "computer": "host1.domain.local",
+        "kind": "sha256" | "ip" | "domain",
+        "indicator": "...",
+        "count": 1
+      }
+    """
+    if not observations:
+        return
+
+    aggregated: dict[tuple[str, str, str], int] = {}
+
+    for obs in observations:
+        computer = normalize_computer(obs.get("computer") or "")
+        kind = (obs.get("kind") or "").strip().lower()
+        indicator = (obs.get("indicator") or "").strip()
+        count = int(obs.get("count") or 1)
+
+        if not computer or kind not in {"sha256", "ip", "domain"} or not indicator:
+            continue
+
+        key = (computer, kind, indicator)
+        aggregated[key] = aggregated.get(key, 0) + max(1, count)
+
+    if not aggregated:
+        return
+
+    pipe = r.pipeline()
+
+    for (computer, kind, indicator), count in aggregated.items():
+        ckey = computer_key(computer)
+
+        pipe.sadd(KNOWN_COMPUTERS_SET, computer)
+        pipe.hsetnx(ckey, "type", "computer")
+        pipe.hsetnx(ckey, "computer", computer)
+        pipe.hsetnx(ckey, "first_seen", seen_at)
+        pipe.hset(ckey, mapping={"last_seen": seen_at})
+
+        pipe.hincrby(ckey, "event_count_total", count)
+        pipe.hincrby(ckey, computer_event_counter_for_kind(kind), count)
+
+        pipe.sadd(computer_indicator_set(computer, kind), indicator)
+        pipe.hincrby(computer_indicator_counts(computer, kind), indicator, count)
+
+        pipe.sadd(seen_by_computers_key(kind, indicator), computer)
+        pipe.sadd(INDEX_DIRTY_COMPUTER_SET, computer)
+
+    await pipe.execute()
 
 def fmt_epoch(ts: Optional[str]) -> str:
     if not ts:
@@ -1760,6 +1873,87 @@ Greycode
         subject=subject,
         body=body,
     )
+
+
+def computer_sort_index(sort: str) -> str:
+    if sort == "last_seen":
+        return idx_z_computer_last_seen()
+    if sort == "rare_total":
+        return idx_z_computer_rare_total()
+    if sort == "rare_unknown_hash_count":
+        return idx_z_computer_rare_unknown_hash_count()
+    if sort == "red_count":
+        return idx_z_computer_red_count()
+    if sort == "listed_count":
+        return idx_z_computer_listed_count()
+    return idx_z_computer_noticeable_score()
+
+
+async def fetch_computer_page(
+    *,
+    q: str,
+    sort: str,
+    order: str,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    base_z = computer_sort_index(sort)
+    reverse = (order.lower() != "asc")
+    q_lower = (q or "").strip().lower()
+
+    all_count = int(await r.scard(KNOWN_COMPUTERS_SET))
+    zcard = int(await r.zcard(base_z))
+
+    if zcard <= 0:
+        return [], all_count
+
+    page_start = (page - 1) * page_size
+    rows: list[dict[str, Any]] = []
+    total = 0
+
+    members = await (r.zrevrange(base_z, 0, -1) if reverse else r.zrange(base_z, 0, -1))
+
+    for computer in members:
+        if q_lower and q_lower not in computer.lower():
+            continue
+
+        total += 1
+
+        if total <= page_start:
+            continue
+
+        if len(rows) >= page_size:
+            continue
+
+        data = await r.hgetall(computer_key(computer))
+        if not data:
+            continue
+
+        rows.append({
+            "computer": computer,
+            "noticeable_score": int(float(data.get("noticeable_score") or 0)),
+            "rare_unknown_hash_count": int(data.get("rare_unknown_hash_count") or 0),
+            "rare_total": int(data.get("rare_total") or 0),
+            "rare_sha256": int(data.get("rare_sha256") or 0),
+            "rare_ip": int(data.get("rare_ip") or 0),
+            "rare_domain": int(data.get("rare_domain") or 0),
+            "red_count": int(data.get("red_count") or 0),
+            "listed_count": int(data.get("listed_count") or 0),
+            "unique_sha256": int(data.get("unique_sha256") or 0),
+            "unique_ip": int(data.get("unique_ip") or 0),
+            "unique_domain": int(data.get("unique_domain") or 0),
+            "event_count_total": int(data.get("event_count_total") or 0),
+            "last_seen": data.get("last_seen") or "",
+        })
+
+    return rows, total
+
+
+
+
+
+
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, err: str = "", next: str = "/ui"):
@@ -2928,6 +3122,18 @@ async def enrich_process(event: ProcessEvent):
         pipe.sadd(INDEX_DIRTY_SHA256_SET, event.sha256)
         await pipe.execute()
 
+        await update_computer_observations(
+            [
+                {
+                    "computer": event.computer,
+                    "kind": "sha256",
+                    "indicator": event.sha256,
+                    "count": 1,
+                }
+            ],
+            seen_at=now,
+        )
+
         return {
             "sha256": event.sha256,
             "status": status or "GREY",
@@ -2961,6 +3167,18 @@ async def enrich_process(event: ProcessEvent):
         pipe.lpush(VT_QUEUE, event.sha256)
 
     await pipe.execute()
+
+    await update_computer_observations(
+        [
+            {
+                "computer": event.computer,
+                "kind": "sha256",
+                "indicator": event.sha256,
+                "count": 1,
+            }
+        ],
+        seen_at=now,
+    )
 
     return {
         "sha256": event.sha256,
@@ -3020,8 +3238,8 @@ async def enrich_process_bulk(request: Request):
 
     vt_enabled = await vt_enabled_setting()
 
-    # Aggregate by sha256
     aggregated: dict[str, dict[str, Any]] = {}
+    computer_observations: list[dict[str, Any]] = []
 
     manual_filters = await load_manual_filters()
 
@@ -3039,6 +3257,13 @@ async def enrich_process_bulk(request: Request):
 
         accepted += 1
 
+        computer_observations.append({
+            "computer": event.computer,
+            "kind": "sha256",
+            "indicator": event.sha256,
+            "count": 1,
+        })
+
         row = aggregated.get(event.sha256)
         if row is None:
             aggregated[event.sha256] = {
@@ -3053,7 +3278,7 @@ async def enrich_process_bulk(request: Request):
 
     if not aggregated:
         logger.warning(
-            "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+            "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
             len(events),
             accepted,
             rejected,
@@ -3061,6 +3286,7 @@ async def enrich_process_bulk(request: Request):
             new_count,
             existing_count,
             index_sync_count,
+            len(computer_observations),
             (time.perf_counter() - start_perf) * 1000,
         )
         return JSONResponse(
@@ -3070,13 +3296,13 @@ async def enrich_process_bulk(request: Request):
                 "rejected": rejected,
                 "errors": errors[:20],
                 "filtered": filtered,
+                "computer_observations": len(computer_observations),
             }
         )
 
     now = datetime.datetime.utcnow().isoformat()
     hashes = list(aggregated.keys())
 
-    # Fetch only what we need, once per unique sha256
     pipe = r.pipeline()
     for sha256_value in hashes:
         key = f"greycode:sha256:{sha256_value}"
@@ -3132,8 +3358,10 @@ async def enrich_process_bulk(request: Request):
 
     await pipe.execute()
 
+    await update_computer_observations(computer_observations, seen_at=now)
+
     logger.warning(
-        "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        "bulk kind=process received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
@@ -3141,6 +3369,7 @@ async def enrich_process_bulk(request: Request):
         new_count,
         existing_count,
         index_sync_count,
+        len(computer_observations),
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -3151,6 +3380,7 @@ async def enrich_process_bulk(request: Request):
             "rejected": rejected,
             "errors": errors[:20],
             "filtered": filtered,
+            "computer_observations": len(computer_observations),
         }
     )
 
@@ -3201,6 +3431,18 @@ async def enrich_network(event: NetworkEvent):
 
         await pipe.execute()
 
+        await update_computer_observations(
+            [
+                {
+                    "computer": event.Computer,
+                    "kind": "ip",
+                    "indicator": ip_norm,
+                    "count": 1,
+                }
+            ],
+            seen_at=now,
+        )
+
         return {
             "destination_ip": ip_norm,
             "status": status or "GREY",
@@ -3230,6 +3472,18 @@ async def enrich_network(event: NetworkEvent):
     pipe.sadd(KNOWN_IPS_SET, ip_norm)
     pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
     await pipe.execute()
+
+    await update_computer_observations(
+        [
+            {
+                "computer": event.Computer,
+                "kind": "ip",
+                "indicator": ip_norm,
+                "count": 1,
+            }
+        ],
+        seen_at=now,
+    )
 
     return {
         "destination_ip": ip_norm,
@@ -3291,8 +3545,8 @@ async def enrich_network_bulk(request: Request):
     filtered = 0
     manual_filters = await load_manual_filters()
 
-    # Aggregate by normalized IP
     aggregated: dict[str, dict[str, Any]] = {}
+    computer_observations: list[dict[str, Any]] = []
 
     for idx, obj in enumerate(events):
         try:
@@ -3315,6 +3569,13 @@ async def enrich_network_bulk(request: Request):
 
         accepted += 1
 
+        computer_observations.append({
+            "computer": event.Computer,
+            "kind": "ip",
+            "indicator": ip_norm,
+            "count": 1,
+        })
+
         row = aggregated.get(ip_norm)
         if row is None:
             aggregated[ip_norm] = {
@@ -3328,7 +3589,7 @@ async def enrich_network_bulk(request: Request):
 
     if not aggregated:
         logger.warning(
-            "bulk kind=network received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d dur_ms=%.1f",
+            "bulk kind=network received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d computer_obs=%d dur_ms=%.1f",
             len(events),
             accepted,
             rejected,
@@ -3336,6 +3597,7 @@ async def enrich_network_bulk(request: Request):
             existing_count,
             index_sync_count,
             0,
+            len(computer_observations),
             (time.perf_counter() - start_perf) * 1000,
         )
         return JSONResponse(
@@ -3345,6 +3607,7 @@ async def enrich_network_bulk(request: Request):
                 "rejected": rejected,
                 "errors": errors[:20],
                 "filtered": filtered,
+                "computer_observations": len(computer_observations),
             }
         )
 
@@ -3352,7 +3615,6 @@ async def enrich_network_bulk(request: Request):
     now_epoch = time.time()
     ips = list(aggregated.keys())
 
-    # Fetch only what we actually need, once per unique indicator
     pipe = r.pipeline()
     for ip_norm in ips:
         key = f"greycode:ip:{ip_norm}"
@@ -3364,9 +3626,9 @@ async def enrich_network_bulk(request: Request):
     pos = 0
     for ip_norm in ips:
         exists_flag = bool(existence_raw[pos])
-        index_last_sync_val = None
         pos += 1
 
+        index_last_sync_val = None
         hmget_vals = existence_raw[pos]
         pos += 1
         if hmget_vals and len(hmget_vals) >= 1:
@@ -3429,8 +3691,10 @@ async def enrich_network_bulk(request: Request):
 
     await pipe.execute()
 
+    await update_computer_observations(computer_observations, seen_at=now)
+
     logger.warning(
-        "bulk kind=network received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        "bulk kind=network received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
@@ -3438,6 +3702,7 @@ async def enrich_network_bulk(request: Request):
         new_count,
         existing_count,
         index_sync_count,
+        len(computer_observations),
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -3448,6 +3713,7 @@ async def enrich_network_bulk(request: Request):
             "rejected": rejected,
             "errors": errors[:20],
             "filtered": filtered,
+            "computer_observations": len(computer_observations),
         }
     )
 
@@ -3496,6 +3762,18 @@ async def enrich_dns(event: DnsEvent):
 
         await pipe.execute()
 
+        await update_computer_observations(
+            [
+                {
+                    "computer": event.Computer,
+                    "kind": "domain",
+                    "indicator": domain_norm,
+                    "count": 1,
+                }
+            ],
+            seen_at=now,
+        )
+
         return {
             "query_name": domain_norm,
             "status": status or "GREY",
@@ -3525,6 +3803,18 @@ async def enrich_dns(event: DnsEvent):
     pipe.sadd(KNOWN_DOMAINS_SET, domain_norm)
     pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
     await pipe.execute()
+
+    await update_computer_observations(
+        [
+            {
+                "computer": event.Computer,
+                "kind": "domain",
+                "indicator": domain_norm,
+                "count": 1,
+            }
+        ],
+        seen_at=now,
+    )
 
     return {
         "query_name": domain_norm,
@@ -3586,8 +3876,8 @@ async def enrich_dns_bulk(request: Request):
     filtered = 0
     manual_filters = await load_manual_filters()
 
-    # Aggregate by normalized domain
     aggregated: dict[str, dict[str, Any]] = {}
+    computer_observations: list[dict[str, Any]] = []
 
     for idx, obj in enumerate(events):
         try:
@@ -3609,6 +3899,13 @@ async def enrich_dns_bulk(request: Request):
 
         accepted += 1
 
+        computer_observations.append({
+            "computer": event.Computer,
+            "kind": "domain",
+            "indicator": domain_norm,
+            "count": 1,
+        })
+
         row = aggregated.get(domain_norm)
         if row is None:
             aggregated[domain_norm] = {
@@ -3622,7 +3919,7 @@ async def enrich_dns_bulk(request: Request):
 
     if not aggregated:
         logger.warning(
-            "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d dur_ms=%.1f",
+            "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d computer_obs=%d dur_ms=%.1f",
             len(events),
             accepted,
             rejected,
@@ -3630,6 +3927,7 @@ async def enrich_dns_bulk(request: Request):
             existing_count,
             index_sync_count,
             0,
+            len(computer_observations),
             (time.perf_counter() - start_perf) * 1000,
         )
         return JSONResponse(
@@ -3639,6 +3937,7 @@ async def enrich_dns_bulk(request: Request):
                 "rejected": rejected,
                 "errors": errors[:20],
                 "filtered": filtered,
+                "computer_observations": len(computer_observations),
             }
         )
 
@@ -3646,7 +3945,6 @@ async def enrich_dns_bulk(request: Request):
     now_epoch = time.time()
     domains = list(aggregated.keys())
 
-    # Fetch only what we need, once per unique indicator
     pipe = r.pipeline()
     for domain_norm in domains:
         key = f"greycode:domain:{domain_norm}"
@@ -3723,8 +4021,10 @@ async def enrich_dns_bulk(request: Request):
 
     await pipe.execute()
 
+    await update_computer_observations(computer_observations, seen_at=now)
+
     logger.warning(
-        "bulk kind=dns received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d dur_ms=%.1f",
+        "bulk kind=dns received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
@@ -3732,6 +4032,7 @@ async def enrich_dns_bulk(request: Request):
         new_count,
         existing_count,
         index_sync_count,
+        len(computer_observations),
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -3742,6 +4043,7 @@ async def enrich_dns_bulk(request: Request):
             "rejected": rejected,
             "errors": errors[:20],
             "filtered": filtered,
+            "computer_observations": len(computer_observations),
         }
     )
 
@@ -4333,6 +4635,76 @@ async def ui_analyze_upload(
         },
     )
 
+@app.get("/ui/computers", response_class=HTMLResponse)
+async def ui_computers(
+    request: Request,
+    q: str = Query(""),
+    sort: str = Query("noticeable_score"),
+    order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=10, le=1000),
+    _auth=Depends(require_login),
+):
+    return templates.TemplateResponse(
+        "computers.html",
+        {
+            "request": request,
+            "tab": "computers",
+            "q": q,
+            "sort": sort,
+            "order": order,
+            "page": page,
+            "page_size": page_size,
+            "theme": await current_user_theme(request),
+            "vt_enabled": await vt_enabled_setting(),
+            **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.get("/ui/computers/table", response_class=HTMLResponse)
+async def ui_computers_table(
+    request: Request,
+    q: str = Query(""),
+    sort: str = Query("noticeable_score"),
+    order: str = Query("desc"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=10, le=1000),
+    _auth=Depends(require_login),
+):
+    allowed_sorts = {
+        "noticeable_score",
+        "last_seen",
+        "rare_total",
+        "rare_unknown_hash_count",
+        "red_count",
+        "listed_count",
+    }
+
+    if sort not in allowed_sorts:
+        sort = "noticeable_score"
+
+    rows, total = await fetch_computer_page(
+        q=q,
+        sort=sort,
+        order=order,
+        page=page,
+        page_size=page_size,
+    )
+
+    return templates.TemplateResponse(
+        "partials/computers_table.html",
+        {
+            "request": request,
+            "rows": rows,
+            "total": total,
+            "q": q,
+            "sort": sort,
+            "order": order,
+            "page": page,
+            "page_size": page_size,
+        },
+    )
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_redirect(_auth=Depends(require_login)):

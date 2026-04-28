@@ -1,0 +1,105 @@
+<section class="card">
+  {% macro page_url(page_value, sort_value=sort, order_value=order) -%}
+    /ui/computers?q={{ q }}&sort={{ sort_value }}&order={{ order_value }}&page_size={{ page_size }}&page={{ page_value }}
+  {%- endmacro %}
+
+  {% macro table_url(page_value, sort_value=sort, order_value=order) -%}
+    /ui/computers/table?q={{ q }}&sort={{ sort_value }}&order={{ order_value }}&page_size={{ page_size }}&page={{ page_value }}
+  {%- endmacro %}
+
+  {% macro sort_link(label, key) -%}
+    {% set next_order = "asc" if sort == key and order == "desc" else "desc" %}
+    <a class="sortlink"
+       href="{{ page_url(1, key, next_order) }}"
+       hx-get="{{ table_url(1, key, next_order) }}"
+       hx-target="#computerTablewrap"
+       hx-push-url="{{ page_url(1, key, next_order) }}">
+      <span>{{ label }}</span>
+      {% if sort == key %}
+        <span class="sort-ind">{{ "↑" if order == "asc" else "↓" }}</span>
+      {% endif %}
+    </a>
+  {%- endmacro %}
+
+  <div class="tablemeta">
+    <p class="muted" style="margin:0;">
+      Computers: <b>{{ total }}</b> • Page {{ page }}
+    </p>
+  </div>
+
+  <table class="opstable">
+    <thead>
+      <tr>
+        <th class="sortable">{{ sort_link("Computer", "last_seen") }}</th>
+        <th class="sortable num">{{ sort_link("Noticeable", "noticeable_score") }}</th>
+        <th class="sortable num">{{ sort_link("Rare unknown hashes", "rare_unknown_hash_count") }}</th>
+        <th class="sortable num">{{ sort_link("Rare total", "rare_total") }}</th>
+        <th class="num">Rare hashes</th>
+        <th class="num">Rare IPs</th>
+        <th class="num">Rare domains</th>
+        <th class="sortable num">{{ sort_link("RED", "red_count") }}</th>
+        <th class="sortable num">{{ sort_link("Listed", "listed_count") }}</th>
+        <th class="num">Unique H/IP/D</th>
+        <th class="num">Events</th>
+        <th class="sortable">{{ sort_link("Last seen", "last_seen") }}</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td class="mono" title="{{ row.computer }}">{{ row.computer }}</td>
+          <td class="num"><span class="badge match-rare">{{ row.noticeable_score }}</span></td>
+          <td class="num">
+            {% if row.rare_unknown_hash_count > 0 %}
+              <span class="badge match-new">{{ row.rare_unknown_hash_count }}</span>
+            {% else %}
+              0
+            {% endif %}
+          </td>
+          <td class="num">{{ row.rare_total }}</td>
+          <td class="num">{{ row.rare_sha256 }}</td>
+          <td class="num">{{ row.rare_ip }}</td>
+          <td class="num">{{ row.rare_domain }}</td>
+          <td class="num">
+            {% if row.red_count > 0 %}
+              <span class="badge match-red">{{ row.red_count }}</span>
+            {% else %}
+              0
+            {% endif %}
+          </td>
+          <td class="num">
+            {% if row.listed_count > 0 %}
+              <span class="badge match-listed">{{ row.listed_count }}</span>
+            {% else %}
+              0
+            {% endif %}
+          </td>
+          <td class="num">{{ row.unique_sha256 }}/{{ row.unique_ip }}/{{ row.unique_domain }}</td>
+          <td class="num">{{ row.event_count_total }}</td>
+          <td class="mono">{{ row.last_seen or "-" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pager">
+    {% if page > 1 %}
+      <a class="btn"
+         href="{{ page_url(page - 1) }}"
+         hx-get="{{ table_url(page - 1) }}"
+         hx-target="#computerTablewrap"
+         hx-push-url="{{ page_url(page - 1) }}">Prev</a>
+    {% endif %}
+
+    <span class="muted">Page {{ page }}</span>
+
+    {% if page * page_size < total %}
+      <a class="btn"
+         href="{{ page_url(page + 1) }}"
+         hx-get="{{ table_url(page + 1) }}"
+         hx-target="#computerTablewrap"
+         hx-push-url="{{ page_url(page + 1) }}">Next</a>
+    {% endif %}
+  </div>
+</section>

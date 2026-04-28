@@ -7,19 +7,26 @@ try:
     from indexes import (
         update_sha256_indexes,
         update_listing_indexes,
+        update_computer_indexes,
         remove_from_all_indexes,
+        remove_computer_from_indexes,
     )
 except ModuleNotFoundError:
     from greycode_core.indexes import (
         update_sha256_indexes,
         update_listing_indexes,
+        update_computer_indexes,
         remove_from_all_indexes,
-    ) 
+        remove_computer_from_indexes,
+    )
 
 
 KNOWN_SHA256_SET = "greycode:known:sha256"
 KNOWN_IPS_SET = "greycode:known:ips"
 KNOWN_DOMAINS_SET = "greycode:known:domains"
+KNOWN_COMPUTERS_SET = "greycode:known:computers"
+
+DEFAULT_RARE_COMPUTER_THRESHOLD = 10
 
 
 def iso_to_epoch(ts: Optional[str]) -> float:
@@ -39,6 +46,30 @@ def record_key_for_kind(kind: str, indicator: str) -> str:
     if kind == "domain":
         return f"greycode:domain:{indicator}"
     raise ValueError(f"Unknown kind: {kind}")
+
+
+def normalize_computer(computer: str) -> str:
+    return (computer or "").strip().lower().rstrip(".")
+
+
+def computer_key(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}"
+
+
+def computer_sha256_set(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}:sha256"
+
+
+def computer_ip_set(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}:ips"
+
+
+def computer_domain_set(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}:domains"
+
+
+def seen_by_computers_key(kind: str, indicator: str) -> str:
+    return f"greycode:seen_by:{kind}:{indicator}"
 
 
 async def sync_sha256_indexes(r: redis.Redis, sha256_value: str) -> None:
@@ -103,4 +134,157 @@ async def sync_domain_indexes(r: redis.Redis, domain_value: str) -> None:
         count_total=int(data.get("count_total") or 0),
         last_seen_epoch=iso_to_epoch(data.get("last_seen")),
         listing_state=(data.get("listing_state") or "").upper(),
+    )
+
+
+async def _fetch_indicator_meta(r: redis.Redis, kind: str, indicators: list[str]) -> list[dict]:
+    if not indicators:
+        return []
+
+    pipe = r.pipeline()
+    for indicator in indicators:
+        pipe.hgetall(record_key_for_kind(kind, indicator))
+        pipe.scard(seen_by_computers_key(kind, indicator))
+    raw = await pipe.execute()
+
+    out: list[dict] = []
+    pos = 0
+    for indicator in indicators:
+        data = raw[pos] or {}
+        pos += 1
+        computer_count = int(raw[pos] or 0)
+        pos += 1
+
+        out.append(
+            {
+                "indicator": indicator,
+                "data": data,
+                "computer_count": computer_count,
+            }
+        )
+
+    return out
+
+
+async def sync_computer_indexes(
+    r: redis.Redis,
+    computer: str,
+    rare_threshold: int = DEFAULT_RARE_COMPUTER_THRESHOLD,
+) -> None:
+    computer_norm = normalize_computer(computer)
+    if not computer_norm:
+        return
+
+    key = computer_key(computer_norm)
+    data = await r.hgetall(key)
+
+    if not data:
+        await remove_computer_from_indexes(r, computer=computer_norm)
+        await r.srem(KNOWN_COMPUTERS_SET, computer_norm)
+        return
+
+    sha256_values = sorted(await r.smembers(computer_sha256_set(computer_norm)))
+    ip_values = sorted(await r.smembers(computer_ip_set(computer_norm)))
+    domain_values = sorted(await r.smembers(computer_domain_set(computer_norm)))
+
+    rare_sha256 = 0
+    rare_ip = 0
+    rare_domain = 0
+    rare_unknown_hash_count = 0
+    red_count = 0
+    listed_count = 0
+
+    sha_meta = await _fetch_indicator_meta(r, "sha256", sha256_values)
+    for item in sha_meta:
+        indicator_data = item["data"]
+        prevalence = int(item["computer_count"] or 0)
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        vt_state = (indicator_data.get("vt_state") or "").upper()
+
+        is_rare = prevalence > 0 and prevalence <= rare_threshold
+
+        if is_rare:
+            rare_sha256 += 1
+
+        if is_rare and vt_state == "NOT_FOUND":
+            rare_unknown_hash_count += 1
+
+        if status == "RED":
+            red_count += 1
+
+    ip_meta = await _fetch_indicator_meta(r, "ip", ip_values)
+    for item in ip_meta:
+        indicator_data = item["data"]
+        prevalence = int(item["computer_count"] or 0)
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        listing_state = (indicator_data.get("listing_state") or "").upper()
+
+        if prevalence > 0 and prevalence <= rare_threshold:
+            rare_ip += 1
+
+        if status == "RED":
+            red_count += 1
+
+        if listing_state == "LISTED":
+            listed_count += 1
+
+    domain_meta = await _fetch_indicator_meta(r, "domain", domain_values)
+    for item in domain_meta:
+        indicator_data = item["data"]
+        prevalence = int(item["computer_count"] or 0)
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        listing_state = (indicator_data.get("listing_state") or "").upper()
+
+        if prevalence > 0 and prevalence <= rare_threshold:
+            rare_domain += 1
+
+        if status == "RED":
+            red_count += 1
+
+        if listing_state == "LISTED":
+            listed_count += 1
+
+    rare_total = rare_sha256 + rare_ip + rare_domain
+
+    noticeable_score = (
+        rare_unknown_hash_count * 25
+        + rare_sha256 * 6
+        + rare_ip * 5
+        + rare_domain * 3
+        + listed_count * 10
+        + red_count * 5
+    )
+
+    mapping = {
+        "type": "computer",
+        "computer": computer_norm,
+        "unique_sha256": str(len(sha256_values)),
+        "unique_ip": str(len(ip_values)),
+        "unique_domain": str(len(domain_values)),
+        "rare_unknown_hash_count": str(rare_unknown_hash_count),
+        "rare_sha256": str(rare_sha256),
+        "rare_ip": str(rare_ip),
+        "rare_domain": str(rare_domain),
+        "rare_total": str(rare_total),
+        "red_count": str(red_count),
+        "listed_count": str(listed_count),
+        "noticeable_score": str(noticeable_score),
+        "index_last_sync": str(time.time()),
+    }
+
+    await r.hset(key, mapping=mapping)
+    await r.sadd(KNOWN_COMPUTERS_SET, computer_norm)
+
+    await update_computer_indexes(
+        r,
+        computer=computer_norm,
+        noticeable_score=float(noticeable_score),
+        last_seen_epoch=iso_to_epoch(data.get("last_seen")),
+        rare_total=rare_total,
+        rare_unknown_hash_count=rare_unknown_hash_count,
+        red_count=red_count,
+        listed_count=listed_count,
     )

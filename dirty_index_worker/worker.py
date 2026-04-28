@@ -9,6 +9,7 @@ from greycode_core.index_sync import (
     sync_sha256_indexes,
     sync_ip_indexes,
     sync_domain_indexes,
+    sync_computer_indexes,
 )
 
 logging.basicConfig(
@@ -23,10 +24,12 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 INDEX_DIRTY_SHA256_SET = "greycode:index_dirty:sha256"
 INDEX_DIRTY_IP_SET = "greycode:index_dirty:ip"
 INDEX_DIRTY_DOMAIN_SET = "greycode:index_dirty:domain"
+INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
 
 BATCH_SIZE = int(os.getenv("DIRTY_INDEX_BATCH_SIZE", "200"))
 IDLE_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_IDLE_SLEEP_SEC", "2"))
 BUSY_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_BUSY_SLEEP_SEC", "0.2"))
+RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))
 
 stop_event = asyncio.Event()
 
@@ -56,6 +59,12 @@ async def drain_dirty_set(r: redis.Redis, set_key: str, kind: str, batch_size: i
                 await sync_ip_indexes(r, indicator)
             elif kind == "domain":
                 await sync_domain_indexes(r, indicator)
+            elif kind == "computer":
+                await sync_computer_indexes(
+                    r,
+                    indicator,
+                    rare_threshold=RARE_COMPUTER_THRESHOLD,
+                )
             else:
                 logger.error("unknown kind=%s indicator=%s", kind, indicator)
                 continue
@@ -73,10 +82,11 @@ async def main():
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
     logger.warning(
-        "dirty-index-worker started redis=%s:%s batch_size=%d idle_sleep=%.2f busy_sleep=%.2f",
+        "dirty-index-worker started redis=%s:%s batch_size=%d rare_threshold=%d idle_sleep=%.2f busy_sleep=%.2f",
         REDIS_HOST,
         REDIS_PORT,
         BATCH_SIZE,
+        RARE_COMPUTER_THRESHOLD,
         IDLE_SLEEP_SEC,
         BUSY_SLEEP_SEC,
     )
@@ -86,16 +96,18 @@ async def main():
             ip_done = await drain_dirty_set(r, INDEX_DIRTY_IP_SET, "ip", BATCH_SIZE)
             domain_done = await drain_dirty_set(r, INDEX_DIRTY_DOMAIN_SET, "domain", BATCH_SIZE)
             sha_done = await drain_dirty_set(r, INDEX_DIRTY_SHA256_SET, "sha256", BATCH_SIZE)
+            computer_done = await drain_dirty_set(r, INDEX_DIRTY_COMPUTER_SET, "computer", BATCH_SIZE)
 
-            total = ip_done + domain_done + sha_done
+            total = ip_done + domain_done + sha_done + computer_done
 
             if total > 0:
                 logger.warning(
-                    "dirty-index-worker processed total=%d ip=%d domain=%d sha256=%d",
+                    "dirty-index-worker processed total=%d ip=%d domain=%d sha256=%d computer=%d",
                     total,
                     ip_done,
                     domain_done,
                     sha_done,
+                    computer_done,
                 )
                 await asyncio.sleep(BUSY_SLEEP_SEC)
             else:
