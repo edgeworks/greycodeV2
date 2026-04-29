@@ -29,10 +29,8 @@
 
   <table class="opstable">
     <thead>
-      <tr class="clickable"
-          hx-get="/ui/computer/{{ row.computer }}/drawer"
-          hx-target="#drawer">
-        <th class="sortable">{{ sort_link("Computer", "last_seen") }}</th>
+      <tr>
+        <th>Computer</th>
         <th class="sortable num">{{ sort_link("Noticeable", "noticeable_score") }}</th>
         <th class="sortable num">{{ sort_link("Rare unknown hashes", "rare_unknown_hash_count") }}</th>
         <th class="sortable num">{{ sort_link("Rare total", "rare_total") }}</th>
@@ -49,7 +47,9 @@
 
     <tbody>
       {% for row in rows %}
-        <tr>
+        <tr class="clickable"
+            hx-get="/ui/computer/{{ row.computer }}/drawer"
+            hx-target="#drawer">
           <td class="mono" title="{{ row.computer }}">{{ row.computer }}</td>
           <td class="num"><span class="badge match-rare">{{ row.noticeable_score }}</span></td>
           <td class="num">
