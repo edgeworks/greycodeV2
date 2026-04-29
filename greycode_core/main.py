@@ -4646,9 +4646,9 @@ async def ui_computers(
     _auth=Depends(require_login),
 ):
     return templates.TemplateResponse(
-        "computers.html",
-        {
-            "request": request,
+        request=request,
+        name="computers.html",
+        context={
             "tab": "computers",
             "q": q,
             "sort": sort,
@@ -4693,9 +4693,9 @@ async def ui_computers_table(
     )
 
     return templates.TemplateResponse(
-        "partials/computers_table.html",
-        {
-            "request": request,
+        request=request,
+        name="partials/computers_table.html",
+        context={
             "rows": rows,
             "total": total,
             "q": q,
