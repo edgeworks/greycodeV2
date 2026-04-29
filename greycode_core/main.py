@@ -1948,7 +1948,225 @@ async def fetch_computer_page(
 
     return rows, total
 
+def computer_excluded_set(computer: str, kind: str) -> str:
+    computer_norm = normalize_computer(computer)
+    if kind == "sha256":
+        return f"greycode:computer:{computer_norm}:excluded:sha256"
+    if kind == "ip":
+        return f"greycode:computer:{computer_norm}:excluded:ip"
+    if kind == "domain":
+        return f"greycode:computer:{computer_norm}:excluded:domain"
+    raise ValueError(f"Unknown exclusion kind: {kind}")
 
+
+def computer_exclusion_meta_key(computer: str) -> str:
+    return f"greycode:computer:{normalize_computer(computer)}:exclusion_meta"
+
+
+def computer_exclusion_meta_field(kind: str, indicator: str) -> str:
+    return f"{kind}:{indicator}"
+
+
+def tab_for_kind(kind: str) -> int:
+    if kind == "sha256":
+        return 1
+    if kind == "ip":
+        return 3
+    if kind == "domain":
+        return 22
+    raise ValueError(f"Unknown kind: {kind}")
+
+
+def open_url_for_indicator(kind: str, indicator: str) -> str:
+    return f"/ui/sysmon/{tab_for_kind(kind)}?open={quote(indicator, safe='')}"
+
+
+def indicator_label_for_kind(kind: str) -> str:
+    if kind == "sha256":
+        return "SHA256"
+    if kind == "ip":
+        return "Destination IP"
+    if kind == "domain":
+        return "QueryName"
+    return kind
+
+
+async def build_computer_indicator_rows(
+    computer: str,
+    *,
+    rare_threshold: int = RARE_COMPUTER_THRESHOLD,
+) -> dict[str, Any]:
+    computer_norm = normalize_computer(computer)
+
+    sha_values = sorted(await r.smembers(computer_indicator_set(computer_norm, "sha256")))
+    ip_values = sorted(await r.smembers(computer_indicator_set(computer_norm, "ip")))
+    domain_values = sorted(await r.smembers(computer_indicator_set(computer_norm, "domain")))
+
+    excluded_sha = set(await r.smembers(computer_excluded_set(computer_norm, "sha256")))
+    excluded_ip = set(await r.smembers(computer_excluded_set(computer_norm, "ip")))
+    excluded_domain = set(await r.smembers(computer_excluded_set(computer_norm, "domain")))
+
+    rows_by_group: dict[str, list[dict[str, Any]]] = {
+        "rare_unknown_hashes": [],
+        "red_indicators": [],
+        "listed_indicators": [],
+        "rare_hashes": [],
+        "rare_ips": [],
+        "rare_domains": [],
+        "excluded": [],
+    }
+
+    async def add_kind_rows(kind: str, indicators: list[str], excluded_set: set[str]) -> None:
+        if not indicators:
+            return
+
+        counts_key = computer_indicator_counts(computer_norm, kind)
+
+        pipe = r.pipeline()
+        for indicator in indicators:
+            pipe.hget(counts_key, indicator)
+            pipe.hgetall(record_key_for_kind(kind, indicator))
+            pipe.scard(seen_by_computers_key(kind, indicator))
+            pipe.hget(
+                computer_exclusion_meta_key(computer_norm),
+                computer_exclusion_meta_field(kind, indicator),
+            )
+        raw = await pipe.execute()
+
+        pos = 0
+        for indicator in indicators:
+            local_count = int(raw[pos] or 0)
+            pos += 1
+
+            data = raw[pos] or {}
+            pos += 1
+
+            org_computer_count = int(raw[pos] or 0)
+            pos += 1
+
+            exclusion_meta_raw = raw[pos] or ""
+            pos += 1
+
+            status = (data.get("status") or "GREY").upper()
+            vt_state = (data.get("vt_state") or "").upper()
+            listing_state = (data.get("listing_state") or "").upper()
+            org_count_total = int(data.get("count_total") or 0)
+            is_rare = org_computer_count > 0 and org_computer_count <= rare_threshold
+            is_excluded = indicator in excluded_set
+
+            row = {
+                "kind": kind,
+                "kind_label": indicator_label_for_kind(kind),
+                "tab": tab_for_kind(kind),
+                "indicator": indicator,
+                "indicator_short": f"{indicator[:18]}…" if kind == "sha256" and len(indicator) > 24 else indicator,
+                "local_count": local_count,
+                "org_count_total": org_count_total,
+                "org_computer_count": org_computer_count,
+                "is_rare": is_rare,
+                "is_excluded": is_excluded,
+                "status": status,
+                "vt_state": vt_state,
+                "vt_malicious": int(data.get("vt_malicious") or 0),
+                "listing_state": listing_state,
+                "source": data.get("source") or "",
+                "first_seen": data.get("first_seen") or "",
+                "last_seen": data.get("last_seen") or "",
+                "image": data.get("image") or "",
+                "computer_first": data.get("computer_first") or data.get("computer") or "",
+                "computer_last": data.get("computer_last") or data.get("computer") or "",
+                "disposition": (data.get("disposition") or "").upper(),
+                "ticket_id": data.get("ticket_id") or "",
+                "open_url": open_url_for_indicator(kind, indicator),
+                "exclusion_meta_raw": exclusion_meta_raw,
+            }
+
+            if is_excluded:
+                rows_by_group["excluded"].append(row)
+                continue
+
+            if kind == "sha256" and is_rare and vt_state == "NOT_FOUND":
+                row["driver"] = "RARE_UNKNOWN_HASH"
+                rows_by_group["rare_unknown_hashes"].append(row)
+            elif status == "RED":
+                row["driver"] = "RED"
+                rows_by_group["red_indicators"].append(row)
+            elif kind in {"ip", "domain"} and listing_state == "LISTED":
+                row["driver"] = "LISTED"
+                rows_by_group["listed_indicators"].append(row)
+            elif kind == "sha256" and is_rare:
+                row["driver"] = "RARE_HASH"
+                rows_by_group["rare_hashes"].append(row)
+            elif kind == "ip" and is_rare:
+                row["driver"] = "RARE_IP"
+                rows_by_group["rare_ips"].append(row)
+            elif kind == "domain" and is_rare:
+                row["driver"] = "RARE_DOMAIN"
+                rows_by_group["rare_domains"].append(row)
+
+    await add_kind_rows("sha256", sha_values, excluded_sha)
+    await add_kind_rows("ip", ip_values, excluded_ip)
+    await add_kind_rows("domain", domain_values, excluded_domain)
+
+    for group_rows in rows_by_group.values():
+        group_rows.sort(
+            key=lambda x: (
+                -int(x.get("local_count") or 0),
+                int(x.get("org_computer_count") or 999999),
+                x.get("indicator") or "",
+            )
+        )
+
+    groups = [
+        {
+            "key": "rare_unknown_hashes",
+            "title": "Rare unknown hashes",
+            "hint": "Hashes seen on few computers where VirusTotal returned NOT_FOUND.",
+            "rows": rows_by_group["rare_unknown_hashes"],
+        },
+        {
+            "key": "red_indicators",
+            "title": "RED indicators",
+            "hint": "Indicators currently marked RED globally.",
+            "rows": rows_by_group["red_indicators"],
+        },
+        {
+            "key": "listed_indicators",
+            "title": "Listed IPs/domains",
+            "hint": "Network indicators found on blacklist feeds.",
+            "rows": rows_by_group["listed_indicators"],
+        },
+        {
+            "key": "rare_hashes",
+            "title": "Rare hashes",
+            "hint": "Hashes seen on few computers, excluding rare unknown and RED indicators.",
+            "rows": rows_by_group["rare_hashes"],
+        },
+        {
+            "key": "rare_ips",
+            "title": "Rare IPs",
+            "hint": "Destination IPs seen on few computers.",
+            "rows": rows_by_group["rare_ips"],
+        },
+        {
+            "key": "rare_domains",
+            "title": "Rare domains",
+            "hint": "DNS names seen on few computers.",
+            "rows": rows_by_group["rare_domains"],
+        },
+        {
+            "key": "excluded",
+            "title": "Excluded from score",
+            "hint": "Indicators excluded from this computer's noticeable score.",
+            "rows": rows_by_group["excluded"],
+        },
+    ]
+
+    return {
+        "groups": groups,
+        "total_contributors": sum(len(g["rows"]) for g in groups if g["key"] != "excluded"),
+        "excluded_count": len(rows_by_group["excluded"]),
+    }
 
 
 
@@ -4705,6 +4923,143 @@ async def ui_computers_table(
             "page_size": page_size,
         },
     )
+
+@app.get("/ui/computer/{computer}/drawer", response_class=HTMLResponse)
+async def ui_computer_drawer(
+    request: Request,
+    computer: str,
+    _auth=Depends(require_login),
+):
+    computer_norm = normalize_computer(computer)
+    data = await r.hgetall(computer_key(computer_norm))
+
+    if not data:
+        return HTMLResponse("<div class='card'><p class='muted'>Computer not found.</p></div>", status_code=404)
+
+    contributors = await build_computer_indicator_rows(
+        computer_norm,
+        rare_threshold=RARE_COMPUTER_THRESHOLD,
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/computer_drawer.html",
+        context={
+            "computer": computer_norm,
+            "data": data,
+            "groups": contributors["groups"],
+            "total_contributors": contributors["total_contributors"],
+            "excluded_count": contributors["excluded_count"],
+            "rare_threshold": RARE_COMPUTER_THRESHOLD,
+            "can_triage": can_triage(request),
+            "can_delete": can_delete(request),
+        },
+    )
+
+
+@app.post("/ui/computer/{computer}/exclude", response_class=HTMLResponse)
+async def ui_computer_exclude_indicator(
+    request: Request,
+    computer: str,
+    kind: str = Form(...),
+    indicator: str = Form(...),
+    reason: str = Form(""),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    kind = (kind or "").strip().lower()
+    if kind not in {"sha256", "ip", "domain"}:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+
+    if kind == "ip":
+        indicator = normalize_ip(indicator)
+    elif kind == "domain":
+        indicator = normalize_domain(indicator)
+    else:
+        indicator = (indicator or "").strip().upper()
+
+    now = now_iso()
+
+    meta = {
+        "excluded_at": now,
+        "excluded_by": current_username(request),
+        "reason": (reason or "").strip(),
+    }
+
+    pipe = r.pipeline()
+    pipe.sadd(computer_excluded_set(computer_norm, kind), indicator)
+    pipe.hset(
+        computer_exclusion_meta_key(computer_norm),
+        computer_exclusion_meta_field(kind, indicator),
+        json.dumps(meta, ensure_ascii=False, sort_keys=True),
+    )
+    pipe.sadd(INDEX_DIRTY_COMPUTER_SET, computer_norm)
+    await pipe.execute()
+
+    await sync_computer_indexes(r, computer_norm, rare_threshold=RARE_COMPUTER_THRESHOLD)
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="computer",
+        action="exclude_from_score",
+        target_kind=kind,
+        target=f"{computer_norm}:{indicator}",
+        details=meta,
+    )
+
+    return await ui_computer_drawer(request, computer_norm)
+
+
+@app.post("/ui/computer/{computer}/include", response_class=HTMLResponse)
+async def ui_computer_include_indicator(
+    request: Request,
+    computer: str,
+    kind: str = Form(...),
+    indicator: str = Form(...),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    kind = (kind or "").strip().lower()
+    if kind not in {"sha256", "ip", "domain"}:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+
+    if kind == "ip":
+        indicator = normalize_ip(indicator)
+    elif kind == "domain":
+        indicator = normalize_domain(indicator)
+    else:
+        indicator = (indicator or "").strip().upper()
+
+    pipe = r.pipeline()
+    pipe.srem(computer_excluded_set(computer_norm, kind), indicator)
+    pipe.hdel(
+        computer_exclusion_meta_key(computer_norm),
+        computer_exclusion_meta_field(kind, indicator),
+    )
+    pipe.sadd(INDEX_DIRTY_COMPUTER_SET, computer_norm)
+    await pipe.execute()
+
+    await sync_computer_indexes(r, computer_norm, rare_threshold=RARE_COMPUTER_THRESHOLD)
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="computer",
+        action="include_in_score",
+        target_kind=kind,
+        target=f"{computer_norm}:{indicator}",
+        details={},
+    )
+
+    return await ui_computer_drawer(request, computer_norm)
+
 
 @app.get("/ui", response_class=HTMLResponse)
 async def ui_redirect(_auth=Depends(require_login)):

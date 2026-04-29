@@ -29,7 +29,9 @@
 
   <table class="opstable">
     <thead>
-      <tr>
+      <tr class="clickable"
+          hx-get="/ui/computer/{{ row.computer }}/drawer"
+          hx-target="#drawer">
         <th class="sortable">{{ sort_link("Computer", "last_seen") }}</th>
         <th class="sortable num">{{ sort_link("Noticeable", "noticeable_score") }}</th>
         <th class="sortable num">{{ sort_link("Rare unknown hashes", "rare_unknown_hash_count") }}</th>

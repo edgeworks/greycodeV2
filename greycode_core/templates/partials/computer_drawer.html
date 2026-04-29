@@ -1,0 +1,248 @@
+<div class="card computer-drawer">
+  <script>
+    (function () {
+      const p = document.getElementById("drawerPanel");
+      if (p) p.classList.add("drawer-panel-wide");
+    })();
+  </script>
+
+  <h2 style="margin-top:0;">Computer details</h2>
+
+  <p class="mono" style="margin: 6px 0 10px 0;">
+    <b>{{ computer }}</b>
+  </p>
+
+  <div class="detail-badges">
+    <span class="badge match-rare">Noticeable {{ data.get("noticeable_score","0") }}</span>
+
+    {% if data.get("rare_unknown_hash_count","0")|int > 0 %}
+      <span class="badge match-new">Rare unknown hashes {{ data.get("rare_unknown_hash_count","0") }}</span>
+    {% endif %}
+
+    {% if data.get("red_count","0")|int > 0 %}
+      <span class="badge match-red">RED {{ data.get("red_count","0") }}</span>
+    {% endif %}
+
+    {% if data.get("listed_count","0")|int > 0 %}
+      <span class="badge match-listed">Listed {{ data.get("listed_count","0") }}</span>
+    {% endif %}
+
+    {% if excluded_count > 0 %}
+      <span class="badge">Excluded {{ excluded_count }}</span>
+    {% endif %}
+  </div>
+
+  <div class="drawer-body">
+    <div class="facts">
+      <div class="fact">
+        <div class="k">Noticeable score</div>
+        <div class="v mono">{{ data.get("noticeable_score","0") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Rare threshold</div>
+        <div class="v mono">≤ {{ rare_threshold }} computers</div>
+      </div>
+      <div class="fact">
+        <div class="k">Last seen</div>
+        <div class="v mono">{{ data.get("last_seen","-") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Events</div>
+        <div class="v mono">{{ data.get("event_count_total","0") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Unique hashes</div>
+        <div class="v mono">{{ data.get("unique_sha256","0") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Unique IPs / domains</div>
+        <div class="v mono">{{ data.get("unique_ip","0") }} / {{ data.get("unique_domain","0") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Rare hashes / IPs / domains</div>
+        <div class="v mono">{{ data.get("rare_sha256","0") }} / {{ data.get("rare_ip","0") }} / {{ data.get("rare_domain","0") }}</div>
+      </div>
+      <div class="fact">
+        <div class="k">Score contributors</div>
+        <div class="v mono">{{ total_contributors }}</div>
+      </div>
+    </div>
+
+    <div class="settings-separator"></div>
+
+    <section class="computer-driver-list">
+      <h2 style="margin-top:0;">Scoring contributors</h2>
+      <p class="muted">
+        Indicators are grouped by their first scoring reason. Excluding an indicator removes it from this computer's score only.
+      </p>
+
+      {% for group in groups %}
+        <details class="computer-driver-group" {% if group.rows and group.key != "excluded" %}open{% endif %}>
+          <summary>
+            <span>{{ group.title }}</span>
+            <span class="badge">{{ group.rows|length }}</span>
+          </summary>
+
+          <div class="computer-driver-group-body">
+            <p class="muted">{{ group.hint }}</p>
+
+            {% if group.rows %}
+              <div class="computer-indicator-list">
+                {% for row in group.rows %}
+                  <details class="computer-indicator-card">
+                    <summary>
+                      <span class="computer-indicator-main">
+                        <span class="badge">{{ row.kind_label }}</span>
+
+                        {% if row.driver %}
+                          <span class="badge match-rare">{{ row.driver }}</span>
+                        {% endif %}
+
+                        {% if row.status == "RED" %}
+                          <span class="badge match-red">RED</span>
+                        {% endif %}
+
+                        {% if row.listing_state == "LISTED" %}
+                          <span class="badge match-listed">LISTED</span>
+                        {% endif %}
+
+                        {% if row.vt_state %}
+                          <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+                        {% endif %}
+
+                        {% if row.is_excluded %}
+                          <span class="badge">EXCLUDED</span>
+                        {% endif %}
+
+                        <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                      </span>
+
+                      <span class="computer-indicator-metrics">
+                        local {{ row.local_count }} • org computers {{ row.org_computer_count }} • org events {{ row.org_count_total }}
+                      </span>
+                    </summary>
+
+                    <div class="computer-indicator-detail">
+                      <div class="facts">
+                        <div class="fact">
+                          <div class="k">Indicator</div>
+                          <div class="v mono wrap">{{ row.indicator }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Kind</div>
+                          <div class="v">{{ row.kind_label }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Local count</div>
+                          <div class="v mono">{{ row.local_count }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Org computer count</div>
+                          <div class="v mono">{{ row.org_computer_count }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Org event count</div>
+                          <div class="v mono">{{ row.org_count_total }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Status</div>
+                          <div class="v">
+                            <span class="badge status-{{ row.status|lower }}">{{ row.status }}</span>
+                          </div>
+                        </div>
+
+                        {% if row.kind == "sha256" %}
+                          <div class="fact">
+                            <div class="k">VT state</div>
+                            <div class="v">
+                              {% if row.vt_state %}
+                                <span class="badge vt-{{ row.vt_state|lower }}">{{ row.vt_state }}</span>
+                              {% else %}
+                                -
+                              {% endif %}
+                              {% if row.vt_malicious and row.vt_malicious|int > 0 %}
+                                <span class="badge vtred">{{ row.vt_malicious }}</span>
+                              {% endif %}
+                            </div>
+                          </div>
+                          <div class="fact span2">
+                            <div class="k">Image</div>
+                            <div class="v mono wrap">{{ row.image or "-" }}</div>
+                          </div>
+                        {% else %}
+                          <div class="fact">
+                            <div class="k">Listing</div>
+                            <div class="v">
+                              {% if row.listing_state %}
+                                <span class="badge ls-{{ row.listing_state|lower }}">{{ row.listing_state }}</span>
+                              {% else %}
+                                -
+                              {% endif %}
+                            </div>
+                          </div>
+                          <div class="fact">
+                            <div class="k">Computer first / last</div>
+                            <div class="v wrap">{{ row.computer_first or "-" }} / {{ row.computer_last or "-" }}</div>
+                          </div>
+                        {% endif %}
+
+                        <div class="fact">
+                          <div class="k">First seen</div>
+                          <div class="v mono">{{ row.first_seen or "-" }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Last seen</div>
+                          <div class="v mono">{{ row.last_seen or "-" }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Source</div>
+                          <div class="v mono wrap">{{ row.source or "-" }}</div>
+                        </div>
+                        <div class="fact">
+                          <div class="k">Disposition</div>
+                          <div class="v">{{ row.disposition or "-" }}</div>
+                        </div>
+                      </div>
+
+                      <div class="computer-indicator-actions">
+                        <a class="btn" href="{{ row.open_url }}" target="_blank" rel="noopener noreferrer">
+                          Open full indicator
+                        </a>
+
+                        {% if can_triage %}
+                          {% if row.is_excluded %}
+                            <form hx-post="/ui/computer/{{ computer }}/include"
+                                  hx-target="#drawer"
+                                  hx-swap="innerHTML"
+                                  hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                              <input type="hidden" name="kind" value="{{ row.kind }}">
+                              <input type="hidden" name="indicator" value="{{ row.indicator }}">
+                              <button class="btn primary" type="submit">Include in score</button>
+                            </form>
+                          {% else %}
+                            <form class="computer-exclude-form"
+                                  hx-post="/ui/computer/{{ computer }}/exclude"
+                                  hx-target="#drawer"
+                                  hx-swap="innerHTML"
+                                  hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                              <input type="hidden" name="kind" value="{{ row.kind }}">
+                              <input type="hidden" name="indicator" value="{{ row.indicator }}">
+                              <input name="reason" placeholder="Optional reason">
+                              <button class="btn" type="submit">Exclude from score</button>
+                            </form>
+                          {% endif %}
+                        {% endif %}
+                      </div>
+                    </div>
+                  </details>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="analyze-empty">No indicators in this group.</div>
+            {% endif %}
+          </div>
+        </details>
+      {% endfor %}
+    </section>
+  </div>
+</div>

@@ -2152,3 +2152,133 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Computer Drawer ---------- */
+
+.drawer-panel.drawer-panel-wide {
+  width: min(1180px, 96vw);
+  max-width: 96vw;
+}
+
+.computer-drawer .drawer-body {
+  padding-bottom: 20px;
+}
+
+.computer-driver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.computer-driver-group {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card2);
+  overflow: hidden;
+}
+
+.computer-driver-group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.computer-driver-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.computer-driver-group-body {
+  padding: 0 14px 14px;
+}
+
+.computer-indicator-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.computer-indicator-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.computer-indicator-card > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.computer-indicator-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.computer-indicator-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.computer-indicator-metrics {
+  color: var(--muted);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.computer-indicator-detail {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.computer-indicator-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.computer-exclude-form {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.computer-exclude-form input[name="reason"] {
+  width: 260px;
+  max-width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+@media (max-width: 760px) {
+  .computer-indicator-card > summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .computer-indicator-metrics {
+    white-space: normal;
+  }
+
+  .drawer-panel.drawer-panel-wide {
+    width: 100vw;
+    max-width: 100vw;
+  }
+}

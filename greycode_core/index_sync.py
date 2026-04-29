@@ -71,6 +71,15 @@ def computer_domain_set(computer: str) -> str:
 def seen_by_computers_key(kind: str, indicator: str) -> str:
     return f"greycode:seen_by:{kind}:{indicator}"
 
+def computer_excluded_set(computer: str, kind: str) -> str:
+    computer_norm = normalize_computer(computer)
+    if kind == "sha256":
+        return f"greycode:computer:{computer_norm}:excluded:sha256"
+    if kind == "ip":
+        return f"greycode:computer:{computer_norm}:excluded:ip"
+    if kind == "domain":
+        return f"greycode:computer:{computer_norm}:excluded:domain"
+    raise ValueError(f"Unknown exclusion kind: {kind}")
 
 async def sync_sha256_indexes(r: redis.Redis, sha256_value: str) -> None:
     key = f"greycode:sha256:{sha256_value}"
@@ -187,6 +196,10 @@ async def sync_computer_indexes(
     ip_values = sorted(await r.smembers(computer_ip_set(computer_norm)))
     domain_values = sorted(await r.smembers(computer_domain_set(computer_norm)))
 
+    excluded_sha = set(await r.smembers(computer_excluded_set(computer_norm, "sha256")))
+    excluded_ip = set(await r.smembers(computer_excluded_set(computer_norm, "ip")))
+    excluded_domain = set(await r.smembers(computer_excluded_set(computer_norm, "domain")))
+
     rare_sha256 = 0
     rare_ip = 0
     rare_domain = 0
@@ -196,6 +209,14 @@ async def sync_computer_indexes(
 
     sha_meta = await _fetch_indicator_meta(r, "sha256", sha256_values)
     for item in sha_meta:
+        indicator = item["indicator"]
+
+        # Computer-scoped score exclusion:
+        # keep the observation and global indicator state intact,
+        # but do not let this indicator contribute to this computer's score.
+        if indicator in excluded_sha:
+            continue
+
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 
@@ -215,6 +236,11 @@ async def sync_computer_indexes(
 
     ip_meta = await _fetch_indicator_meta(r, "ip", ip_values)
     for item in ip_meta:
+        indicator = item["indicator"]
+
+        if indicator in excluded_ip:
+            continue
+
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 
@@ -232,6 +258,11 @@ async def sync_computer_indexes(
 
     domain_meta = await _fetch_indicator_meta(r, "domain", domain_values)
     for item in domain_meta:
+        indicator = item["indicator"]
+
+        if indicator in excluded_domain:
+            continue
+
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 

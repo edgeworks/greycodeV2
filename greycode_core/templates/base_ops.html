@@ -152,6 +152,9 @@
       if (d) d.setAttribute("aria-hidden", "true");
     }
 
+    const p = document.getElementById("drawerPanel");
+      if (p) p.classList.remove("drawer-panel-wide");
+
     // Backdrop click closes drawer
     document.addEventListener("click", function (e) {
       if (e.target && e.target.id === "drawerBackdrop") gcCloseDrawer();
@@ -336,6 +339,15 @@
       const url = tw.getAttribute("hx-get");
       if (!url) return;
       htmx.ajax("GET", url, "#tablewrap");
+    }
+  </script>
+  <script>
+    function gcRefreshComputerTable() {
+      const tw = document.getElementById("computerTablewrap");
+      if (!tw) return;
+      const url = tw.getAttribute("hx-get");
+      if (!url) return;
+      htmx.ajax("GET", url, "#computerTablewrap");
     }
   </script>
   {% endblock %}
