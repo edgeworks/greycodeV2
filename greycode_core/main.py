@@ -5060,11 +5060,13 @@ async def ui_computer_drawer(
     if not data:
         return HTMLResponse("<div class='card'><p class='muted'>Computer not found.</p></div>", status_code=404)
 
+    scoring = await load_scoring_settings()
+    rare_threshold = scoring["rare_computer_threshold"]
+
     contributors = await build_computer_indicator_rows(
         computer_norm,
+        rare_threshold=rare_threshold,
     )
-
-    scoring = await load_scoring_settings(),
 
     return templates.TemplateResponse(
         request=request,
@@ -5075,7 +5077,7 @@ async def ui_computer_drawer(
             "groups": contributors["groups"],
             "total_contributors": contributors["total_contributors"],
             "excluded_count": contributors["excluded_count"],
-            "rare_threshold": scoring["rare_computer_threshold"],
+            "rare_threshold": rare_threshold,
             "can_triage": can_triage(request),
             "can_delete": can_delete(request),
         },
