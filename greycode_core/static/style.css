@@ -518,11 +518,23 @@ label.switch {
   flex-direction: row;
 }
 
+/* unified form fields */
 .controls input,
 .controls select,
 .settings-form input,
 .settings-form select,
-.escalate input {
+.settings-row input,
+.settings-row select,
+.settings-grid input,
+.settings-grid select,
+.inline-form input,
+.inline-form select,
+.escalate input,
+.annotation-form input,
+.annotation-form textarea,
+.computer-exclude-form input[name="reason"],
+.analyze-inline-field input,
+.analyze-upload-form input[type="file"] {
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -531,12 +543,64 @@ label.switch {
   outline: none;
 }
 
+/* focus */
 .controls input:focus,
 .controls select:focus,
 .settings-form input:focus,
 .settings-form select:focus,
-.escalate input:focus {
+.settings-row input:focus,
+.settings-row select:focus,
+.settings-grid input:focus,
+.settings-grid select:focus,
+.inline-form input:focus,
+.inline-form select:focus,
+.escalate input:focus,
+.annotation-form input:focus,
+.annotation-form textarea:focus,
+.computer-exclude-form input[name="reason"]:focus,
+.analyze-inline-field input:focus,
+.analyze-upload-form input[type="file"]:focus {
   border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+/* native select dropdown rendering */
+select {
+  color: var(--text);
+  background-color: var(--input-bg);
+}
+
+body[data-theme="dark"] select {
+  color-scheme: dark;
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+body[data-theme="dark"] select option,
+body[data-theme="dark"] select optgroup {
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+body[data-theme="light"] select {
+  color-scheme: light;
+  background-color: var(--surface-1);
+  color: var(--text);
+}
+
+body[data-theme="light"] select option,
+body[data-theme="light"] select optgroup {
+  background-color: var(--surface-1);
+  color: var(--text);
+}
+
+body[data-theme="dark"] select option:checked {
+  background-color: var(--surface-3);
+  color: var(--text);
+}
+
+body[data-theme="light"] select option:checked {
+  background-color: var(--surface-3);
+  color: var(--text);
 }
 
 .analyze-stack {
@@ -556,14 +620,6 @@ label.switch {
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.analyze-upload-form input[type="file"] {
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
 }
 
 .analyze-check {
@@ -659,11 +715,6 @@ label.switch {
 
 .analyze-inline-field input[type="number"] {
   width: 100px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
 }
 
 .badge.match-new {
@@ -2260,11 +2311,6 @@ input[type="checkbox"] {
 .computer-exclude-form input[name="reason"] {
   width: 260px;
   max-width: 100%;
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
 }
 
 @media (max-width: 760px) {
