@@ -40,6 +40,10 @@
         <div class="v mono">{{ data.get("count_total","0") }}</div>
       </div>
       <div class="fact">
+        <div class="k">Org computers</div>
+        <div class="v mono">{{ org_computer_count or 0 }}</div>
+      </div>
+      <div class="fact">
         <div class="k">First seen</div>
         <div class="v mono">{{ data.get("first_seen","-") }}</div>
       </div>

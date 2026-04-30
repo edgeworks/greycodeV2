@@ -1779,6 +1779,9 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
     data = await r.hgetall(key)
     if not data:
         return HTMLResponse("<div class='card'><p class='muted'>Not found.</p></div>", status_code=404)
+    
+    kind = "sha256" if tab == 1 else "ip" if tab == 3 else "domain"
+    org_computer_count = int(await r.scard(seen_by_computers_key(kind, indicator)) or 0)
 
     parsed_tags = parse_tags_field(data.get("tags") or "")
 
@@ -1797,6 +1800,7 @@ async def render_sysmon_drawer(request: Request, tab: int, indicator: str) -> HT
             "can_delete": can_delete(request),
             "parsed_tags": parsed_tags,
             "comment_text": data.get("comment") or "",
+            "org_computer_count": org_computer_count,
         },
     )
 
