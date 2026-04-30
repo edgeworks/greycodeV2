@@ -1,0 +1,106 @@
+<form class="settings-form"
+      hx-post="/ui/settings/scoring"
+      hx-target="#settingsModalContent"
+      hx-swap="innerHTML">
+
+  <div class="settings-subtitle">Computer scoring</div>
+
+  <div class="settings-grid">
+
+    <label>
+      Rare computer threshold
+      <input name="scoring_rare_computer_threshold"
+             type="number"
+             min="1"
+             max="100000"
+             value="{{ settings.get('scoring_rare_computer_threshold', '10') }}">
+      <span class="hint muted">
+        An indicator is considered rare when it has been seen on this many computers or fewer.
+        Default: 10.
+      </span>
+    </label>
+
+    <label>
+      Rare unknown hash weight
+      <input name="scoring_weight_rare_unknown_hash"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_rare_unknown_hash', '25') }}">
+      <span class="hint muted">
+        Score added for rare hashes where VirusTotal returned NOT_FOUND. This is weighted highest because new malware is often unknown.
+      </span>
+    </label>
+
+    <label>
+      Rare hash weight
+      <input name="scoring_weight_rare_sha256"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_rare_sha256', '6') }}">
+      <span class="hint muted">
+        Score added for rare hashes that are not rare unknown hashes and are not otherwise higher-priority.
+      </span>
+    </label>
+
+    <label>
+      Rare IP weight
+      <input name="scoring_weight_rare_ip"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_rare_ip', '5') }}">
+      <span class="hint muted">
+        Score added for destination IPs seen on few computers.
+      </span>
+    </label>
+
+    <label>
+      Rare domain weight
+      <input name="scoring_weight_rare_domain"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_rare_domain', '3') }}">
+      <span class="hint muted">
+        Score added for DNS names seen on few computers. Usually lower than IP/hash because domains can be noisy.
+      </span>
+    </label>
+
+    <label>
+      Listed indicator weight
+      <input name="scoring_weight_listed"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_listed', '10') }}">
+      <span class="hint muted">
+        Score added for IPs or domains listed by configured blacklist sources.
+      </span>
+    </label>
+
+    <label>
+      RED indicator weight
+      <input name="scoring_weight_red"
+             type="number"
+             min="0"
+             max="100000"
+             value="{{ settings.get('scoring_weight_red', '5') }}">
+      <span class="hint muted">
+        Score added for globally RED indicators. Kept lower than rare unknown hashes because local AV or false positives may already explain many VT RED cases.
+      </span>
+    </label>
+
+  </div>
+
+  <div class="notice-banner warn" style="margin-top:14px;">
+    <div>
+      Changing scoring settings marks all known computers for re-scoring. The dirty index worker will update the table asynchronously.
+    </div>
+  </div>
+
+  <div class="settings-actions">
+    <button class="btn primary" type="submit">Save scoring settings</button>
+  </div>
+</form>

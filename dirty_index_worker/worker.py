@@ -29,7 +29,7 @@ INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
 BATCH_SIZE = int(os.getenv("DIRTY_INDEX_BATCH_SIZE", "200"))
 IDLE_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_IDLE_SLEEP_SEC", "2"))
 BUSY_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_BUSY_SLEEP_SEC", "0.2"))
-RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))
+RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))  # fallback only
 
 stop_event = asyncio.Event()
 

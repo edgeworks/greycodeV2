@@ -28,6 +28,17 @@ KNOWN_COMPUTERS_SET = "greycode:known:computers"
 
 DEFAULT_RARE_COMPUTER_THRESHOLD = 10
 
+CFG_KEY = "greycode:cfg"
+
+SCORING_FALLBACKS = {
+    "rare_computer_threshold": 10,
+    "weight_rare_unknown_hash": 25,
+    "weight_rare_sha256": 6,
+    "weight_rare_ip": 5,
+    "weight_rare_domain": 3,
+    "weight_listed": 10,
+    "weight_red": 5,
+}
 
 def iso_to_epoch(ts: Optional[str]) -> float:
     if not ts:
@@ -80,6 +91,49 @@ def computer_excluded_set(computer: str, kind: str) -> str:
     if kind == "domain":
         return f"greycode:computer:{computer_norm}:excluded:domain"
     raise ValueError(f"Unknown exclusion kind: {kind}")
+
+def _safe_score_int(raw: str | None, default: int, lo: int = 0, hi: int = 100000) -> int:
+    try:
+        n = int(raw or default)
+        return max(lo, min(hi, n))
+    except Exception:
+        return default
+
+
+async def load_scoring_settings_from_redis(r: redis.Redis) -> dict[str, int]:
+    cfg = await r.hgetall(CFG_KEY)
+
+    return {
+        "rare_computer_threshold": _safe_score_int(
+            cfg.get("scoring_rare_computer_threshold"),
+            SCORING_FALLBACKS["rare_computer_threshold"],
+            1,
+        ),
+        "weight_rare_unknown_hash": _safe_score_int(
+            cfg.get("scoring_weight_rare_unknown_hash"),
+            SCORING_FALLBACKS["weight_rare_unknown_hash"],
+        ),
+        "weight_rare_sha256": _safe_score_int(
+            cfg.get("scoring_weight_rare_sha256"),
+            SCORING_FALLBACKS["weight_rare_sha256"],
+        ),
+        "weight_rare_ip": _safe_score_int(
+            cfg.get("scoring_weight_rare_ip"),
+            SCORING_FALLBACKS["weight_rare_ip"],
+        ),
+        "weight_rare_domain": _safe_score_int(
+            cfg.get("scoring_weight_rare_domain"),
+            SCORING_FALLBACKS["weight_rare_domain"],
+        ),
+        "weight_listed": _safe_score_int(
+            cfg.get("scoring_weight_listed"),
+            SCORING_FALLBACKS["weight_listed"],
+        ),
+        "weight_red": _safe_score_int(
+            cfg.get("scoring_weight_red"),
+            SCORING_FALLBACKS["weight_red"],
+        ),
+    }
 
 async def sync_sha256_indexes(r: redis.Redis, sha256_value: str) -> None:
     key = f"greycode:sha256:{sha256_value}"
@@ -187,6 +241,9 @@ async def sync_computer_indexes(
     key = computer_key(computer_norm)
     data = await r.hgetall(key)
 
+    scoring = await load_scoring_settings_from_redis(r)
+    rare_threshold = scoring["rare_computer_threshold"]
+
     if not data:
         await remove_computer_from_indexes(r, computer=computer_norm)
         await r.srem(KNOWN_COMPUTERS_SET, computer_norm)
@@ -281,12 +338,12 @@ async def sync_computer_indexes(
     rare_total = rare_sha256 + rare_ip + rare_domain
 
     noticeable_score = (
-        rare_unknown_hash_count * 25
-        + rare_sha256 * 6
-        + rare_ip * 5
-        + rare_domain * 3
-        + listed_count * 10
-        + red_count * 5
+        rare_unknown_hash_count * scoring["weight_rare_unknown_hash"]
+        + rare_sha256 * scoring["weight_rare_sha256"]
+        + rare_ip * scoring["weight_rare_ip"]
+        + rare_domain * scoring["weight_rare_domain"]
+        + listed_count * scoring["weight_listed"]
+        + red_count * scoring["weight_red"]
     )
 
     mapping = {
@@ -304,6 +361,13 @@ async def sync_computer_indexes(
         "listed_count": str(listed_count),
         "noticeable_score": str(noticeable_score),
         "index_last_sync": str(time.time()),
+        "scoring_rare_computer_threshold": str(rare_threshold),
+        "scoring_weight_rare_unknown_hash": str(scoring["weight_rare_unknown_hash"]),
+        "scoring_weight_rare_sha256": str(scoring["weight_rare_sha256"]),
+        "scoring_weight_rare_ip": str(scoring["weight_rare_ip"]),
+        "scoring_weight_rare_domain": str(scoring["weight_rare_domain"]),
+        "scoring_weight_listed": str(scoring["weight_listed"]),
+        "scoring_weight_red": str(scoring["weight_red"]),
     }
 
     await r.hset(key, mapping=mapping)

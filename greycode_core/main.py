@@ -297,6 +297,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notify_smtp_user": "",
     "notify_smtp_pass_enc": "",
     "notify_smtp_starttls": "0",
+
+    "scoring_rare_computer_threshold": "10",
+    "scoring_weight_rare_unknown_hash": "25",
+    "scoring_weight_rare_sha256": "6",
+    "scoring_weight_rare_ip": "5",
+    "scoring_weight_rare_domain": "3",
+    "scoring_weight_listed": "10",
+    "scoring_weight_red": "5",
 }
 
 
@@ -405,6 +413,38 @@ async def save_settings(mapping: dict[str, str]) -> None:
     clean = {k: v for k, v in mapping.items() if k in allowed}
     if clean:
         await r.hset(CFG_KEY, mapping=clean)
+
+SCORING_DEFAULTS = {
+    "rare_computer_threshold": 10,
+    "weight_rare_unknown_hash": 25,
+    "weight_rare_sha256": 6,
+    "weight_rare_ip": 5,
+    "weight_rare_domain": 3,
+    "weight_listed": 10,
+    "weight_red": 5,
+}
+
+
+def _setting_int(settings: dict[str, Any], key: str, default: int, lo: int = 0, hi: int = 100000) -> int:
+    try:
+        n = int(settings.get(key) or default)
+        return max(lo, min(hi, n))
+    except Exception:
+        return default
+
+
+async def load_scoring_settings() -> dict[str, int]:
+    s = await load_settings()
+    return {
+        "rare_computer_threshold": _setting_int(s, "scoring_rare_computer_threshold", 10, 1, 100000),
+        "weight_rare_unknown_hash": _setting_int(s, "scoring_weight_rare_unknown_hash", 25, 0, 100000),
+        "weight_rare_sha256": _setting_int(s, "scoring_weight_rare_sha256", 6, 0, 100000),
+        "weight_rare_ip": _setting_int(s, "scoring_weight_rare_ip", 5, 0, 100000),
+        "weight_rare_domain": _setting_int(s, "scoring_weight_rare_domain", 3, 0, 100000),
+        "weight_listed": _setting_int(s, "scoring_weight_listed", 10, 0, 100000),
+        "weight_red": _setting_int(s, "scoring_weight_red", 5, 0, 100000),
+    }
+
 
 def normalize_filter_kind(kind: str) -> str:
     k = (kind or "").strip().lower()
@@ -2249,6 +2289,8 @@ def settings_partial_for(tab: str) -> str:
         return "partials/settings_tab_users.html"
     if tab == "audit":
         return "partials/settings_tab_audit.html"
+    if tab == "scoring":
+        return "partials/settings_tab_scoring.html"
     return "partials/settings_tab_blacklists_apis.html"
 
 
@@ -3196,6 +3238,64 @@ async def ui_settings_notifications(request: Request, _auth=Depends(require_logi
             "saved": "notifications",
             "settings_tab": "notifications",
             "settings_partial": settings_partial_for("notifications"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.post("/ui/settings/scoring")
+async def ui_settings_scoring(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
+    form = await request.form()
+
+    def as_int_str(name: str, default: str, lo: int, hi: int) -> str:
+        try:
+            n = int((form.get(name) or default).strip())
+            return str(max(lo, min(hi, n)))
+        except Exception:
+            return default
+
+    mapping = {
+        "scoring_rare_computer_threshold": as_int_str("scoring_rare_computer_threshold", "10", 1, 100000),
+        "scoring_weight_rare_unknown_hash": as_int_str("scoring_weight_rare_unknown_hash", "25", 0, 100000),
+        "scoring_weight_rare_sha256": as_int_str("scoring_weight_rare_sha256", "6", 0, 100000),
+        "scoring_weight_rare_ip": as_int_str("scoring_weight_rare_ip", "5", 0, 100000),
+        "scoring_weight_rare_domain": as_int_str("scoring_weight_rare_domain", "3", 0, 100000),
+        "scoring_weight_listed": as_int_str("scoring_weight_listed", "10", 0, 100000),
+        "scoring_weight_red": as_int_str("scoring_weight_red", "5", 0, 100000),
+    }
+
+    await save_settings(mapping)
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_scoring",
+        target_kind="settings",
+        target="scoring",
+        details={k: [prev.get(k), v] for k, v in mapping.items()},
+    )
+
+    # Re-score all known computers with new parameters.
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": "scoring",
+            "settings_tab": "scoring",
+            "settings_partial": settings_partial_for("scoring"),
             "is_admin": can_manage_settings(request),
             **(await get_ui_metrics()),
         },
@@ -4942,7 +5042,7 @@ async def ui_computer_drawer(
 
     contributors = await build_computer_indicator_rows(
         computer_norm,
-        rare_threshold=RARE_COMPUTER_THRESHOLD,
+        "rare_threshold": (await load_scoring_settings())["rare_computer_threshold"],
     )
 
     return templates.TemplateResponse(
