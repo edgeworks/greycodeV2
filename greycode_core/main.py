@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from urllib.parse import quote
 import secrets
 import redis.asyncio as redis
+import asyncio
 import uuid
 import datetime
 import ipaddress
@@ -149,12 +150,31 @@ UI_PASS = os.getenv("GREYCODE_UI_PASS", "")
 
 @app.on_event("startup")
 async def startup_bootstrap() -> None:
-    await ensure_bootstrap_admin(
-        r,
-        bootstrap_username=UI_USER,
-        bootstrap_password_hash=UI_PASS,
-        bootstrap_email="",
-    )
+    max_wait_sec = int(os.getenv("GREYCODE_REDIS_STARTUP_WAIT_SEC", "120"))
+    deadline = time.time() + max_wait_sec
+
+    while True:
+        try:
+            await r.ping()
+            await ensure_bootstrap_admin(
+                r,
+                bootstrap_username=UI_USER,
+                bootstrap_password_hash=UI_PASS,
+                bootstrap_email="",
+            )
+            return
+
+        except redis.BusyLoadingError:
+            if time.time() >= deadline:
+                raise
+            logger.warning("Redis is still loading dataset; waiting before Greycode bootstrap...")
+            await asyncio.sleep(2)
+
+        except redis.ConnectionError:
+            if time.time() >= deadline:
+                raise
+            logger.warning("Redis is not reachable yet; waiting before Greycode bootstrap...")
+            await asyncio.sleep(2)
 
 # DEBUG Domain filter
 @app.get("/debug/filter-match")
