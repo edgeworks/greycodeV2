@@ -1,4 +1,7 @@
 import time
+import fnmatch
+import ipaddress
+import json
 from typing import Optional
 
 import redis.asyncio as redis
@@ -29,6 +32,7 @@ KNOWN_COMPUTERS_SET = "greycode:known:computers"
 DEFAULT_RARE_COMPUTER_THRESHOLD = 10
 
 CFG_KEY = "greycode:cfg"
+MANUAL_FILTERS_KEY = "greycode:cfg:manual_filters"
 
 SCORING_FALLBACKS = {
     "rare_computer_threshold": 10,
@@ -228,6 +232,177 @@ async def _fetch_indicator_meta(r: redis.Redis, kind: str, indicators: list[str]
 
     return out
 
+def normalize_ip(ip: str) -> str:
+    ip = (ip or "").strip()
+    if not ip:
+        raise ValueError("empty ip")
+    return str(ipaddress.ip_address(ip))
+
+
+def normalize_domain(qname: str) -> str:
+    d = (qname or "").strip().lower()
+    if d.endswith("."):
+        d = d[:-1]
+    return d
+
+
+def normalize_filter_kind(kind: str) -> str:
+    k = (kind or "").strip().lower()
+    if k not in {"image", "ip", "domain"}:
+        raise ValueError("Invalid filter kind")
+    return k
+
+
+def normalize_image_for_match(value: str) -> str:
+    v = (value or "").strip().lower()
+    return v.replace("/", "\\")
+
+
+def normalize_filter_pattern(kind: str, pattern: str) -> str:
+    p = (pattern or "").strip()
+    if not p:
+        raise ValueError("Pattern is required")
+
+    kind = normalize_filter_kind(kind)
+
+    if kind == "image":
+        return normalize_image_for_match(p)
+
+    if kind == "domain":
+        return normalize_domain(p)
+
+    if kind == "ip":
+        return p.strip()
+
+    return p
+
+
+def manual_filter_matches(kind: str, pattern: str, value: str) -> bool:
+    kind = normalize_filter_kind(kind)
+
+    if kind == "image":
+        return fnmatch.fnmatchcase(
+            normalize_image_for_match(value),
+            normalize_filter_pattern("image", pattern),
+        )
+
+    if kind == "domain":
+        v = normalize_domain(value)
+        if not v:
+            return False
+        return fnmatch.fnmatchcase(
+            v,
+            normalize_filter_pattern("domain", pattern),
+        )
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(value)
+        except ValueError:
+            return False
+
+        p = normalize_filter_pattern("ip", pattern)
+
+        if "/" in p:
+            try:
+                net = ipaddress.ip_network(p, strict=False)
+                return ipaddress.ip_address(ip_norm) in net
+            except ValueError:
+                return False
+
+        return fnmatch.fnmatchcase(ip_norm, p)
+
+    return False
+
+
+async def load_manual_filters_from_redis(r: redis.Redis) -> list[dict[str, str]]:
+    raw = await r.get(MANUAL_FILTERS_KEY)
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    out: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        kind = (item.get("kind") or "").strip().lower()
+        pattern = (item.get("pattern") or "").strip()
+        rule_id = (item.get("id") or "").strip()
+
+        if kind not in {"image", "ip", "domain"} or not pattern or not rule_id:
+            continue
+
+        out.append({
+            "id": rule_id,
+            "kind": kind,
+            "pattern": pattern,
+        })
+
+    return out
+
+
+def is_single_label_domain(domain: str) -> bool:
+    d = normalize_domain(domain)
+    if not d:
+        return True
+    return "." not in d
+
+
+async def drop_single_label_dns_setting_from_redis(r: redis.Redis) -> bool:
+    val = await r.hget(CFG_KEY, "filter_drop_single_label_dns")
+    return (val if val is not None else "1") == "1"
+
+
+async def indicator_is_filtered_for_scoring(
+    r: redis.Redis,
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None,
+    manual_filters: list[dict[str, str]],
+) -> bool:
+    if kind == "sha256":
+        image = ""
+        if data:
+            image = data.get("image") or ""
+        return bool(image and any(
+            f.get("kind") == "image" and manual_filter_matches("image", f.get("pattern") or "", image)
+            for f in manual_filters
+        ))
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(indicator)
+        except ValueError:
+            return True
+
+        return any(
+            f.get("kind") == "ip" and manual_filter_matches("ip", f.get("pattern") or "", ip_norm)
+            for f in manual_filters
+        )
+
+    if kind == "domain":
+        dom = normalize_domain(indicator)
+        if not dom:
+            return True
+
+        if await drop_single_label_dns_setting_from_redis(r) and is_single_label_domain(dom):
+            return True
+
+        return any(
+            f.get("kind") == "domain" and manual_filter_matches("domain", f.get("pattern") or "", dom)
+            for f in manual_filters
+        )
+
+    return False
 
 async def sync_computer_indexes(
     r: redis.Redis,
@@ -257,6 +432,8 @@ async def sync_computer_indexes(
     excluded_ip = set(await r.smembers(computer_excluded_set(computer_norm, "ip")))
     excluded_domain = set(await r.smembers(computer_excluded_set(computer_norm, "domain")))
 
+    manual_filters = await load_manual_filters_from_redis(r)
+
     rare_sha256 = 0
     rare_ip = 0
     rare_domain = 0
@@ -282,6 +459,15 @@ async def sync_computer_indexes(
 
         is_rare = prevalence > 0 and prevalence <= rare_threshold
 
+        if await indicator_is_filtered_for_scoring(
+            r,
+            kind="sha256",
+            indicator=indicator,
+            data=indicator_data,
+            manual_filters=manual_filters,
+        ):
+            continue
+
         if is_rare:
             rare_sha256 += 1
 
@@ -303,6 +489,15 @@ async def sync_computer_indexes(
 
         status = (indicator_data.get("status") or "GREY").upper()
         listing_state = (indicator_data.get("listing_state") or "").upper()
+
+        if await indicator_is_filtered_for_scoring(
+            r,
+            kind="ip",
+            indicator=indicator,
+            data=indicator_data,
+            manual_filters=manual_filters,
+        ):
+            continue
 
         if prevalence > 0 and prevalence <= rare_threshold:
             rare_ip += 1
@@ -326,6 +521,14 @@ async def sync_computer_indexes(
         status = (indicator_data.get("status") or "GREY").upper()
         listing_state = (indicator_data.get("listing_state") or "").upper()
 
+        if await indicator_is_filtered_for_scoring(
+            r,
+            kind="domain",
+            indicator=indicator,
+            data=indicator_data,
+            manual_filters=manual_filters,
+        ):
+            continue
         if prevalence > 0 and prevalence <= rare_threshold:
             rare_domain += 1
 

@@ -518,6 +518,22 @@ label.switch {
   flex-direction: row;
 }
 
+.switch-row {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0 !important;
+  color: var(--text) !important;
+}
+
+.switch-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* unified form fields */
 .controls input,
 .controls select,

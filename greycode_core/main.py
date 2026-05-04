@@ -303,6 +303,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "blacklist_recheck_batch": "2000",
     "threatfox_api_key_enc": "",
 
+    "filter_drop_single_label_dns": "1",
+
     "vt_enabled": "0",
     "vt_budget_daily": "500",
     "vt_budget_per_min": "3",
@@ -465,6 +467,43 @@ async def load_scoring_settings() -> dict[str, int]:
         "weight_red": _setting_int(s, "scoring_weight_red", 5, 0, 100000),
     }
 
+async def indicator_is_filtered_for_scoring(
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None = None,
+    manual_filters: list[dict[str, str]] | None = None,
+) -> bool:
+    """
+    True means: keep raw facts if already stored, but do not let this indicator
+    contribute to computer scoring or computer drawer scoring groups.
+    """
+    filters = manual_filters if manual_filters is not None else await load_manual_filters()
+
+    if kind == "sha256":
+        image = ""
+        if data:
+            image = data.get("image") or ""
+        return bool(image and value_matches_any_manual_filter(filters, "image", image))
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(indicator)
+        except ValueError:
+            return True
+        return value_matches_any_manual_filter(filters, "ip", ip_norm)
+
+    if kind == "domain":
+        dom = normalize_domain(indicator)
+        if not dom:
+            return True
+
+        if await drop_single_label_dns_setting() and is_single_label_domain(dom):
+            return True
+
+        return value_matches_any_manual_filter(filters, "domain", dom)
+
+    return False
 
 def normalize_filter_kind(kind: str) -> str:
     k = (kind or "").strip().lower()
@@ -839,6 +878,30 @@ class DnsEvent(BaseModel):
     QueryName: str
     Computer: str
 
+async def drop_single_label_dns_setting() -> bool:
+    return await cfg_get_bool(r, "filter_drop_single_label_dns", default=True)
+
+
+def is_single_label_domain(domain: str) -> bool:
+    d = normalize_domain(domain)
+    if not d:
+        return True
+    return "." not in d
+
+
+async def should_filter_dns_ingest(domain: str, manual_filters: list[dict[str, str]]) -> tuple[bool, str]:
+    domain_norm = normalize_domain(domain)
+
+    if not domain_norm:
+        return True, "invalid_domain"
+
+    if await drop_single_label_dns_setting() and is_single_label_domain(domain_norm):
+        return True, "single_label_dns"
+
+    if value_matches_any_manual_filter(manual_filters, "domain", domain_norm):
+        return True, "manual_domain_filter"
+
+    return False, ""
 
 def normalize_ip(ip: str) -> str:
     """
@@ -2083,6 +2146,8 @@ async def build_computer_indicator_rows(
     async def add_kind_rows(kind: str, indicators: list[str], excluded_set: set[str]) -> None:
         if not indicators:
             return
+        
+        manual_filters = await load_manual_filters()
 
         counts_key = computer_indicator_counts(computer_norm, kind)
 
@@ -2110,6 +2175,14 @@ async def build_computer_indicator_rows(
 
             exclusion_meta_raw = raw[pos] or ""
             pos += 1
+
+            if await indicator_is_filtered_for_scoring(
+                kind=kind,
+                indicator=indicator,
+                data=data,
+                manual_filters=manual_filters,
+            ):
+                continue
 
             status = (data.get("status") or "GREY").upper()
             vt_state = (data.get("vt_state") or "").upper()
@@ -2628,6 +2701,55 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
             "request": request,
             "settings": s,
             "saved": "vt",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.post("/ui/settings/dns-hygiene")
+async def ui_settings_dns_hygiene(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
+    form = await request.form()
+
+    enabled = "1" if form.get("filter_drop_single_label_dns") == "1" else "0"
+
+    await save_settings({
+        "filter_drop_single_label_dns": enabled,
+    })
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_dns_hygiene",
+        target_kind="settings",
+        target="dns_hygiene",
+        details={
+            "filter_drop_single_label_dns": [
+                prev.get("filter_drop_single_label_dns", "1"),
+                enabled,
+            ],
+        },
+    )
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": "dns_hygiene",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
@@ -3443,11 +3565,13 @@ async def ui_profile_password(
 @app.post("/enrich/process")
 async def enrich_process(event: ProcessEvent):
     manual_filters = await load_manual_filters()
-    if value_matches_any_manual_filter(manual_filters, "image", event.image):
+    should_filter, filter_reason = await should_filter_dns_ingest(domain_norm, manual_filters)
+    if should_filter:
         return {
-            "sha256": event.sha256,
+            "query_name": domain_norm,
             "filtered": True,
-            "filter_kind": "image",
+            "filter_kind": "domain",
+            "filter_reason": filter_reason,
         }
     key = f"greycode:sha256:{event.sha256}"
     now = datetime.datetime.utcnow().isoformat()
@@ -4175,7 +4299,7 @@ async def enrich_dns_bulk(request: Request):
       - application/x-ndjson (one JSON object per line)
       - application/json with a JSON array: [ {...}, {...} ]
       - application/json with a single object
-    Expected fields per event (Cribl style):
+    Expected fields per event:
       - Computer
       - QueryName
     """
@@ -4216,6 +4340,8 @@ async def enrich_dns_bulk(request: Request):
     existing_count = 0
     index_sync_count = 0
     filtered = 0
+    filtered_single_label = 0
+    filtered_manual = 0
     manual_filters = await load_manual_filters()
 
     aggregated: dict[str, dict[str, Any]] = {}
@@ -4235,8 +4361,13 @@ async def enrich_dns_bulk(request: Request):
             errors.append({"index": idx, "error": "Invalid QueryName"})
             continue
 
-        if value_matches_any_manual_filter(manual_filters, "domain", domain_norm):
+        should_filter, filter_reason = await should_filter_dns_ingest(domain_norm, manual_filters)
+        if should_filter:
             filtered += 1
+            if filter_reason == "single_label_dns":
+                filtered_single_label += 1
+            elif filter_reason == "manual_domain_filter":
+                filtered_manual += 1
             continue
 
         accepted += 1
@@ -4261,10 +4392,13 @@ async def enrich_dns_bulk(request: Request):
 
     if not aggregated:
         logger.warning(
-            "bulk kind=dns received=%d accepted=%d rejected=%d new=%d existing=%d index_sync=%d unique=%d computer_obs=%d dur_ms=%.1f",
+            "bulk kind=dns received=%d accepted=%d rejected=%d filtered=%d single_label=%d manual=%d new=%d existing=%d index_sync=%d unique=%d computer_obs=%d dur_ms=%.1f",
             len(events),
             accepted,
             rejected,
+            filtered,
+            filtered_single_label,
+            filtered_manual,
             new_count,
             existing_count,
             index_sync_count,
@@ -4279,6 +4413,8 @@ async def enrich_dns_bulk(request: Request):
                 "rejected": rejected,
                 "errors": errors[:20],
                 "filtered": filtered,
+                "filtered_single_label": filtered_single_label,
+                "filtered_manual": filtered_manual,
                 "computer_observations": len(computer_observations),
             }
         )
@@ -4366,10 +4502,13 @@ async def enrich_dns_bulk(request: Request):
     await update_computer_observations(computer_observations, seen_at=now)
 
     logger.warning(
-        "bulk kind=dns received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
+        "bulk kind=dns received=%d accepted=%d rejected=%d filtered=%d single_label=%d manual=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
+        filtered,
+        filtered_single_label,
+        filtered_manual,
         len(domains),
         new_count,
         existing_count,
@@ -4385,6 +4524,8 @@ async def enrich_dns_bulk(request: Request):
             "rejected": rejected,
             "errors": errors[:20],
             "filtered": filtered,
+            "filtered_single_label": filtered_single_label,
+            "filtered_manual": filtered_manual,
             "computer_observations": len(computer_observations),
         }
     )

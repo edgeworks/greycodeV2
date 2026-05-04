@@ -157,6 +157,38 @@
     </div>
   {% endif %}
 
+  <div class="settings-block">
+    <div class="settings-subtitle">DNS ingest hygiene</div>
+
+    <form class="settings-form"
+          hx-post="/ui/settings/dns-hygiene"
+          hx-target="#settingsModalContent"
+          hx-swap="innerHTML">
+
+      <label class="switch-row">
+        <span>
+          <b>Drop single-label DNS queries</b>
+          <span class="hint muted">
+            Drops Sysmon 22 QueryName values without a dot, such as wpad, host1, or Chrome NXDOMAIN probe strings.
+            This reduces noisy rarity scoring. Existing stored domains are not removed automatically, but Computer scoring ignores them after re-scoring.
+          </span>
+        </span>
+
+        <label class="switch">
+          <input type="checkbox"
+                name="filter_drop_single_label_dns"
+                value="1"
+                {% if settings.get('filter_drop_single_label_dns', '1') == '1' %}checked{% endif %}>
+          <span class="slider"></span>
+        </label>
+      </label>
+
+      <div class="settings-actions">
+        <button class="btn primary" type="submit">Save DNS hygiene</button>
+      </div>
+    </form>
+  </div>
+  
   <div class="manual-filter-grid">
 
     <div class="manual-filter-card">
