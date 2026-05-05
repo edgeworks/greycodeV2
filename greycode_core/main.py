@@ -121,6 +121,11 @@ MANUAL_FILTERS_KEY = "greycode:cfg:manual_filters"
 KNOWN_COMPUTERS_SET = "greycode:known:computers"
 INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
 RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))
+GLOBAL_SCORE_EXCLUDE_SHA256_SET = "greycode:scoring:exclude:sha256"
+GLOBAL_SCORE_EXCLUDE_IP_SET = "greycode:scoring:exclude:ip"
+GLOBAL_SCORE_EXCLUDE_DOMAIN_SET = "greycode:scoring:exclude:domain"
+GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY = "greycode:scoring:exclude:patterns"
+GLOBAL_SCORE_EXCLUDE_META_KEY = "greycode:scoring:exclude:meta"
 
 
 #DEBUG RELATED ------
@@ -473,12 +478,17 @@ async def indicator_is_filtered_for_scoring(
     indicator: str,
     data: dict[str, str] | None = None,
     manual_filters: list[dict[str, str]] | None = None,
+    global_patterns: list[dict[str, str]] | None = None,
 ) -> bool:
-    """
-    True means: keep raw facts if already stored, but do not let this indicator
-    contribute to computer scoring or computer drawer scoring groups.
-    """
     filters = manual_filters if manual_filters is not None else await load_manual_filters()
+
+    if await indicator_is_globally_score_excluded(
+        kind=kind,
+        indicator=indicator,
+        data=data,
+        patterns=global_patterns,
+    ):
+        return True
 
     if kind == "sha256":
         image = ""
@@ -1028,6 +1038,123 @@ async def update_computer_observations(
         pipe.sadd(INDEX_DIRTY_COMPUTER_SET, computer)
 
     await pipe.execute()
+
+def global_score_exclude_set(kind: str) -> str:
+    if kind == "sha256":
+        return GLOBAL_SCORE_EXCLUDE_SHA256_SET
+    if kind == "ip":
+        return GLOBAL_SCORE_EXCLUDE_IP_SET
+    if kind == "domain":
+        return GLOBAL_SCORE_EXCLUDE_DOMAIN_SET
+    raise ValueError(f"Unknown kind: {kind}")
+
+
+async def load_global_score_patterns() -> list[dict[str, str]]:
+    raw = await r.get(GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY)
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    out: list[dict[str, str]] = []
+
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+
+        kind = (item.get("kind") or "").strip().lower()
+        pattern = (item.get("pattern") or "").strip()
+        rule_id = (item.get("id") or "").strip()
+
+        if kind not in {"image", "ip", "domain"} or not pattern or not rule_id:
+            continue
+
+        out.append({
+            "id": rule_id,
+            "kind": kind,
+            "pattern": pattern,
+            "created_at": (item.get("created_at") or "").strip(),
+            "created_by": (item.get("created_by") or "").strip(),
+        })
+
+    return out
+
+
+async def save_global_score_patterns(patterns: list[dict[str, str]]) -> None:
+    await r.set(
+        GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY,
+        json.dumps(patterns, ensure_ascii=False, sort_keys=True),
+    )
+
+
+async def matches_global_score_pattern(
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None = None,
+    patterns: list[dict[str, str]] | None = None,
+) -> bool:
+    rules = patterns if patterns is not None else await load_global_score_patterns()
+
+    if kind == "sha256":
+        image = (data or {}).get("image") or ""
+        if not image:
+            return False
+
+        return any(
+            f.get("kind") == "image"
+            and manual_filter_matches("image", f.get("pattern") or "", image)
+            for f in rules
+        )
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(indicator)
+        except ValueError:
+            return True
+
+        return any(
+            f.get("kind") == "ip"
+            and manual_filter_matches("ip", f.get("pattern") or "", ip_norm)
+            for f in rules
+        )
+
+    if kind == "domain":
+        dom = normalize_domain(indicator)
+        if not dom:
+            return True
+
+        return any(
+            f.get("kind") == "domain"
+            and manual_filter_matches("domain", f.get("pattern") or "", dom)
+            for f in rules
+        )
+
+    return False
+
+
+async def indicator_is_globally_score_excluded(
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None = None,
+    patterns: list[dict[str, str]] | None = None,
+) -> bool:
+    if await r.sismember(global_score_exclude_set(kind), indicator):
+        return True
+
+    return await matches_global_score_pattern(
+        kind=kind,
+        indicator=indicator,
+        data=data,
+        patterns=patterns,
+    )
 
 def fmt_epoch(ts: Optional[str]) -> str:
     if not ts:
@@ -2148,6 +2275,7 @@ async def build_computer_indicator_rows(
             return
         
         manual_filters = await load_manual_filters()
+        global_patterns = await load_global_score_patterns()
 
         counts_key = computer_indicator_counts(computer_norm, kind)
 
@@ -2181,6 +2309,7 @@ async def build_computer_indicator_rows(
                 indicator=indicator,
                 data=data,
                 manual_filters=manual_filters,
+                global_patterns=global_patterns,
             ):
                 continue
 
@@ -5281,6 +5410,200 @@ async def ui_computer_exclude_indicator(
 
     return await ui_computer_drawer(request, computer_norm)
 
+@app.post("/ui/computer/{computer}/exclude-bulk", response_class=HTMLResponse)
+async def ui_computer_exclude_bulk(
+    request: Request,
+    computer: str,
+    selected: list[str] = Form(default=[]),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    now = now_iso()
+    actor = current_username(request)
+
+    parsed: list[tuple[str, str]] = []
+
+    for raw in selected:
+        if not raw or ":" not in raw:
+            continue
+
+        kind, indicator = raw.split(":", 1)
+        kind = kind.strip().lower()
+        indicator = indicator.strip()
+
+        if kind not in {"sha256", "ip", "domain"}:
+            continue
+
+        if kind == "ip":
+            try:
+                indicator = normalize_ip(indicator)
+            except ValueError:
+                continue
+        elif kind == "domain":
+            indicator = normalize_domain(indicator)
+            if not indicator:
+                continue
+        else:
+            indicator = indicator.upper()
+
+        parsed.append((kind, indicator))
+
+    if parsed:
+        pipe = r.pipeline()
+        for kind, indicator in parsed:
+            meta = {
+                "excluded_at": now,
+                "excluded_by": actor,
+                "reason": "bulk computer exclusion",
+            }
+            pipe.sadd(computer_excluded_set(computer_norm, kind), indicator)
+            pipe.hset(
+                computer_exclusion_meta_key(computer_norm),
+                computer_exclusion_meta_field(kind, indicator),
+                json.dumps(meta, ensure_ascii=False, sort_keys=True),
+            )
+
+        pipe.sadd(INDEX_DIRTY_COMPUTER_SET, computer_norm)
+        await pipe.execute()
+
+        await sync_computer_indexes(r, computer_norm)
+
+        await audit_log(
+            r,
+            actor=actor,
+            actor_role=current_role(request),
+            category="computer",
+            action="bulk_exclude_from_score",
+            target_kind="computer",
+            target=computer_norm,
+            details={"count": len(parsed)},
+        )
+
+    return await ui_computer_drawer(request, computer_norm)
+
+
+@app.post("/ui/computer/{computer}/exclude-global-bulk", response_class=HTMLResponse)
+async def ui_computer_exclude_global_bulk(
+    request: Request,
+    computer: str,
+    selected: list[str] = Form(default=[]),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    actor = current_username(request)
+    parsed: list[tuple[str, str]] = []
+
+    for raw in selected:
+        if not raw or ":" not in raw:
+            continue
+
+        kind, indicator = raw.split(":", 1)
+        kind = kind.strip().lower()
+        indicator = indicator.strip()
+
+        if kind not in {"sha256", "ip", "domain"}:
+            continue
+
+        if kind == "ip":
+            try:
+                indicator = normalize_ip(indicator)
+            except ValueError:
+                continue
+        elif kind == "domain":
+            indicator = normalize_domain(indicator)
+            if not indicator:
+                continue
+        else:
+            indicator = indicator.upper()
+
+        parsed.append((kind, indicator))
+
+    if parsed:
+        pipe = r.pipeline()
+        for kind, indicator in parsed:
+            pipe.sadd(global_score_exclude_set(kind), indicator)
+
+        computers = await r.smembers(KNOWN_COMPUTERS_SET)
+        if computers:
+            pipe.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+        await pipe.execute()
+
+        await audit_log(
+            r,
+            actor=actor,
+            actor_role=current_role(request),
+            category="computer",
+            action="bulk_global_exclude_from_score",
+            target_kind="global_score_exclusion",
+            target=f"{len(parsed)} indicators",
+            details={"count": len(parsed)},
+        )
+
+    return await ui_computer_drawer(request, computer_norm)
+
+
+@app.post("/ui/computer/{computer}/exclude-pattern", response_class=HTMLResponse)
+async def ui_computer_exclude_pattern(
+    request: Request,
+    computer: str,
+    kind: str = Form(...),
+    pattern: str = Form(...),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    actor = current_username(request)
+
+    kind = (kind or "").strip().lower()
+    pattern = (pattern or "").strip()
+
+    if kind not in {"image", "ip", "domain"}:
+        raise HTTPException(status_code=400, detail="Invalid pattern kind")
+
+    if not pattern:
+        raise HTTPException(status_code=400, detail="Pattern is required")
+
+    # Validate using existing filter normalizers.
+    pattern_norm = normalize_filter_pattern(kind, pattern)
+
+    patterns = await load_global_score_patterns()
+    exists = any(
+        p.get("kind") == kind and p.get("pattern") == pattern_norm
+        for p in patterns
+    )
+
+    if not exists:
+        patterns.append({
+            "id": str(uuid.uuid4()),
+            "kind": kind,
+            "pattern": pattern_norm,
+            "created_at": now_iso(),
+            "created_by": actor,
+        })
+        await save_global_score_patterns(patterns)
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=current_role(request),
+        category="computer",
+        action="global_pattern_exclude_from_score",
+        target_kind=kind,
+        target=pattern_norm,
+        details={"already_existed": exists},
+    )
+
+    return await ui_computer_drawer(request, computer_norm)
 
 @app.post("/ui/computer/{computer}/include", response_class=HTMLResponse)
 async def ui_computer_include_indicator(

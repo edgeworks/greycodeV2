@@ -28,6 +28,10 @@ KNOWN_SHA256_SET = "greycode:known:sha256"
 KNOWN_IPS_SET = "greycode:known:ips"
 KNOWN_DOMAINS_SET = "greycode:known:domains"
 KNOWN_COMPUTERS_SET = "greycode:known:computers"
+GLOBAL_SCORE_EXCLUDE_SHA256_SET = "greycode:scoring:exclude:sha256"
+GLOBAL_SCORE_EXCLUDE_IP_SET = "greycode:scoring:exclude:ip"
+GLOBAL_SCORE_EXCLUDE_DOMAIN_SET = "greycode:scoring:exclude:domain"
+GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY = "greycode:scoring:exclude:patterns"
 
 DEFAULT_RARE_COMPUTER_THRESHOLD = 10
 
@@ -138,6 +142,89 @@ async def load_scoring_settings_from_redis(r: redis.Redis) -> dict[str, int]:
             SCORING_FALLBACKS["weight_red"],
         ),
     }
+
+def global_score_exclude_set(kind: str) -> str:
+    if kind == "sha256":
+        return GLOBAL_SCORE_EXCLUDE_SHA256_SET
+    if kind == "ip":
+        return GLOBAL_SCORE_EXCLUDE_IP_SET
+    if kind == "domain":
+        return GLOBAL_SCORE_EXCLUDE_DOMAIN_SET
+    raise ValueError(f"Unknown kind: {kind}")
+
+
+async def load_global_score_patterns_from_redis(r: redis.Redis) -> list[dict[str, str]]:
+    raw = await r.get(GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY)
+    if not raw:
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    return [
+        {
+            "id": str(x.get("id") or ""),
+            "kind": str(x.get("kind") or "").strip().lower(),
+            "pattern": str(x.get("pattern") or "").strip(),
+        }
+        for x in parsed
+        if isinstance(x, dict)
+        and str(x.get("kind") or "").strip().lower() in {"image", "ip", "domain"}
+        and str(x.get("pattern") or "").strip()
+    ]
+
+
+async def indicator_is_globally_score_excluded(
+    r: redis.Redis,
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None,
+    global_patterns: list[dict[str, str]],
+) -> bool:
+    if await r.sismember(global_score_exclude_set(kind), indicator):
+        return True
+
+    if kind == "sha256":
+        image = (data or {}).get("image") or ""
+        if not image:
+            return False
+
+        return any(
+            p.get("kind") == "image"
+            and manual_filter_matches("image", p.get("pattern") or "", image)
+            for p in global_patterns
+        )
+
+    if kind == "ip":
+        try:
+            ip_norm = normalize_ip(indicator)
+        except ValueError:
+            return True
+
+        return any(
+            p.get("kind") == "ip"
+            and manual_filter_matches("ip", p.get("pattern") or "", ip_norm)
+            for p in global_patterns
+        )
+
+    if kind == "domain":
+        dom = normalize_domain(indicator)
+        if not dom:
+            return True
+
+        return any(
+            p.get("kind") == "domain"
+            and manual_filter_matches("domain", p.get("pattern") or "", dom)
+            for p in global_patterns
+        )
+
+    return False
 
 async def sync_sha256_indexes(r: redis.Redis, sha256_value: str) -> None:
     key = f"greycode:sha256:{sha256_value}"
@@ -433,6 +520,7 @@ async def sync_computer_indexes(
     excluded_domain = set(await r.smembers(computer_excluded_set(computer_norm, "domain")))
 
     manual_filters = await load_manual_filters_from_redis(r)
+    global_patterns = await load_global_score_patterns_from_redis(r)
 
     rare_sha256 = 0
     rare_ip = 0
@@ -445,20 +533,24 @@ async def sync_computer_indexes(
     for item in sha_meta:
         indicator = item["indicator"]
 
-        # Computer-scoped score exclusion:
-        # keep the observation and global indicator state intact,
-        # but do not let this indicator contribute to this computer's score.
+        # 1. Computer-scoped exact exclusion
         if indicator in excluded_sha:
             continue
 
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 
-        status = (indicator_data.get("status") or "GREY").upper()
-        vt_state = (indicator_data.get("vt_state") or "").upper()
+        # 2. Global exact + global pattern exclusions
+        if await indicator_is_globally_score_excluded(
+            r,
+            kind="sha256",
+            indicator=indicator,
+            data=indicator_data,
+            global_patterns=global_patterns,
+        ):
+            continue
 
-        is_rare = prevalence > 0 and prevalence <= rare_threshold
-
+        # 3. Manual ingest filters / other hygiene filters
         if await indicator_is_filtered_for_scoring(
             r,
             kind="sha256",
@@ -467,6 +559,11 @@ async def sync_computer_indexes(
             manual_filters=manual_filters,
         ):
             continue
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        vt_state = (indicator_data.get("vt_state") or "").upper()
+
+        is_rare = prevalence > 0 and prevalence <= rare_threshold
 
         if is_rare:
             rare_sha256 += 1
@@ -481,15 +578,24 @@ async def sync_computer_indexes(
     for item in ip_meta:
         indicator = item["indicator"]
 
+        # 1. Computer-scoped exact exclusion
         if indicator in excluded_ip:
             continue
 
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 
-        status = (indicator_data.get("status") or "GREY").upper()
-        listing_state = (indicator_data.get("listing_state") or "").upper()
+        # 2. Global exact + global pattern exclusions
+        if await indicator_is_globally_score_excluded(
+            r,
+            kind="ip",
+            indicator=indicator,
+            data=indicator_data,
+            global_patterns=global_patterns,
+        ):
+            continue
 
+        # 3. Manual ingest filters / other hygiene filters
         if await indicator_is_filtered_for_scoring(
             r,
             kind="ip",
@@ -498,6 +604,9 @@ async def sync_computer_indexes(
             manual_filters=manual_filters,
         ):
             continue
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        listing_state = (indicator_data.get("listing_state") or "").upper()
 
         if prevalence > 0 and prevalence <= rare_threshold:
             rare_ip += 1
@@ -512,15 +621,24 @@ async def sync_computer_indexes(
     for item in domain_meta:
         indicator = item["indicator"]
 
+        # 1. Computer-scoped exact exclusion
         if indicator in excluded_domain:
             continue
 
         indicator_data = item["data"]
         prevalence = int(item["computer_count"] or 0)
 
-        status = (indicator_data.get("status") or "GREY").upper()
-        listing_state = (indicator_data.get("listing_state") or "").upper()
+        # 2. Global exact + global pattern exclusions
+        if await indicator_is_globally_score_excluded(
+            r,
+            kind="domain",
+            indicator=indicator,
+            data=indicator_data,
+            global_patterns=global_patterns,
+        ):
+            continue
 
+        # 3. Manual ingest filters / other hygiene filters
         if await indicator_is_filtered_for_scoring(
             r,
             kind="domain",
@@ -529,6 +647,10 @@ async def sync_computer_indexes(
             manual_filters=manual_filters,
         ):
             continue
+
+        status = (indicator_data.get("status") or "GREY").upper()
+        listing_state = (indicator_data.get("listing_state") or "").upper()
+
         if prevalence > 0 and prevalence <= rare_threshold:
             rare_domain += 1
 

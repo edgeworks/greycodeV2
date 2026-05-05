@@ -173,6 +173,30 @@
     });
   </script>
   <script>
+    function gcBindComputerDrawerSelection() {
+      const boxes = document.querySelectorAll("#drawer input.computerRowSelect");
+      const badge = document.getElementById("computerSelBadge");
+      const count = document.getElementById("computerSelCount");
+
+      function update() {
+        const n = document.querySelectorAll("#drawer input.computerRowSelect:checked").length;
+        if (badge && count) {
+          count.textContent = String(n);
+          badge.hidden = (n === 0);
+        }
+      }
+
+      boxes.forEach(cb => cb.addEventListener("change", update));
+      update();
+    }
+
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target && e.target.id === "drawer") {
+        gcBindComputerDrawerSelection();
+      }
+    });
+  </script>
+  <script>
     function gcOpenSettingsModal() {
       document.body.classList.add("settings-modal-open");
       const p = document.getElementById("settingsModalPanel");

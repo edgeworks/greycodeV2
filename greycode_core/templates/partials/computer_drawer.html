@@ -73,8 +73,34 @@
     <section class="computer-driver-list">
       <h2 style="margin-top:0;">Scoring contributors</h2>
       <p class="muted">
-        Indicators are grouped by their first scoring reason. Excluding an indicator removes it from this computer's score only.
+        Indicators are grouped by their first scoring reason. Excluding an indicator removes it from scoring, but does not delete the indicator.
       </p>
+
+      {% if can_triage %}
+        <form id="computerBulkExcludeForm"
+              hx-post="/ui/computer/{{ computer }}/exclude-bulk"
+              hx-target="#drawer"
+              hx-swap="innerHTML"
+              hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+
+          <div class="computer-bulk-actions">
+            <span class="selbadge" id="computerSelBadge" hidden>
+              <span id="computerSelCount">0</span> selected
+            </span>
+
+            <button class="btn" type="submit">
+              Exclude selected from this computer
+            </button>
+
+            <button class="btn danger"
+                    type="submit"
+                    hx-post="/ui/computer/{{ computer }}/exclude-global-bulk"
+                    hx-confirm="Exclude selected indicators globally from Computer scoring?">
+              Exclude selected globally
+            </button>
+          </div>
+        </form>
+      {% endif %}
 
       {% for group in groups %}
         <details class="computer-driver-group" {% if group.rows and group.key != "excluded" %}open{% endif %}>
@@ -92,6 +118,15 @@
                   <details class="computer-indicator-card">
                     <summary>
                       <span class="computer-indicator-main">
+                        {% if can_triage and not row.is_excluded %}
+                          <input type="checkbox"
+                                class="computerRowSelect"
+                                name="selected"
+                                value="{{ row.kind }}:{{ row.indicator }}"
+                                form="computerBulkExcludeForm"
+                                onclick="event.stopPropagation()">
+                        {% endif %}
+
                         <span class="badge">{{ row.kind_label }}</span>
 
                         {% if row.driver %}
@@ -242,6 +277,25 @@
                               <button class="btn" type="submit">Exclude from score</button>
                             </form>
                           {% endif %}
+
+                          <form class="computer-exclude-form"
+                                hx-post="/ui/computer/{{ computer }}/exclude-pattern"
+                                hx-target="#drawer"
+                                hx-swap="innerHTML"
+                                hx-confirm="Add this pattern as a global Computer scoring exclusion?"
+                                hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                            {% if row.kind == "sha256" %}
+                              <input type="hidden" name="kind" value="image">
+                              <input name="pattern" value="{{ row.image or '' }}" placeholder="Image wildcard pattern">
+                            {% elif row.kind == "ip" %}
+                              <input type="hidden" name="kind" value="ip">
+                              <input name="pattern" value="{{ row.indicator }}" placeholder="IP, wildcard, or CIDR">
+                            {% else %}
+                              <input type="hidden" name="kind" value="domain">
+                              <input name="pattern" value="{{ row.indicator }}" placeholder="Domain wildcard pattern">
+                            {% endif %}
+                            <button class="btn danger" type="submit">Exclude pattern globally</button>
+                          </form>
                         {% endif %}
                       </div>
                     </div>
