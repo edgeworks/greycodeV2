@@ -114,7 +114,18 @@
                           <span class="badge">EXCLUDED</span>
                         {% endif %}
 
-                        <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                        {% if row.kind == "sha256" %}
+                          <span class="computer-indicator-text">
+                            <span class="mono" title="{{ row.image or row.indicator }}">
+                              {{ row.image or row.indicator_short }}
+                            </span>
+                            <span class="muted mono" title="{{ row.indicator }}">
+                              {{ row.indicator_short }}
+                            </span>
+                          </span>
+                        {% else %}
+                          <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                        {% endif %}
                       </span>
 
                       <span class="computer-indicator-metrics">

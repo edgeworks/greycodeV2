@@ -2259,6 +2259,20 @@ input[type="checkbox"] {
   display: none;
 }
 
+.computer-indicator-text {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.computer-indicator-text > span {
+  max-width: 620px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .computer-driver-group-body {
   padding: 0 14px 14px;
 }
