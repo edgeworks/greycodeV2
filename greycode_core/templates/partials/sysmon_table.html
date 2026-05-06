@@ -190,10 +190,6 @@
             {% if row.has_comment %}
               <span class="badge note-badge" title="Comment present">💬</span>
             {% endif %}
-
-            {% if tab == 22 and row.is_top1m %}
-              <span class="badge" title="Domain appears in Akamai AkaRank Top 1 Million">Top1M</span>
-            {% endif %}
           </td>
 
           {% if tab in [3,22] %}
