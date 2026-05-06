@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import csv
+import io
+import urllib.request
 from typing import List, Tuple
 import redis.asyncio as redis
 
@@ -25,6 +28,13 @@ KNOWN_DOMAINS_SET = "greycode:known:domains"
 
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+KNOWN_COMPUTERS_SET = "greycode:known:computers"
+INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
+
+AKARANK_SET = "greycode:akarank:top1m"
+AKARANK_RANK_HASH = "greycode:akarank:rank"
+AKARANK_META_KEY = "greycode:akarank:meta"
 
 # Interval guardrails
 MIN_INTERVAL_MIN = 5
@@ -69,6 +79,184 @@ async def _get_recheck_batch() -> int:
     except Exception:
         n = DEFAULT_RECHECK_BATCH
     return max(200, min(20000, n))
+
+def normalize_domain(qname: str) -> str:
+    d = (qname or "").strip().lower()
+    if d.endswith("."):
+        d = d[:-1]
+    return d
+
+
+async def _get_akarank_enabled() -> bool:
+    v = await r.hget(CFG_KEY, "akarank_enabled")
+    return (v if v is not None else "1") == "1"
+
+
+async def _get_akarank_url() -> str:
+    v = await r.hget(CFG_KEY, "akarank_url")
+    return (v or "https://www.akamai.com/pdata/akarank/prod/top1M.csv").strip()
+
+
+async def _get_akarank_interval_min() -> int:
+    v = await r.hget(CFG_KEY, "akarank_update_interval_min")
+    try:
+        n = int(v) if v is not None else 1440
+    except Exception:
+        n = 1440
+    return _clamp(n, 60, 10080)
+
+
+def _fetch_akarank_csv_sync(url: str, timeout: int = 60) -> str:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Greycode/akarank-fetcher",
+            "Accept": "text/csv,*/*",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+async def get_akarank_match(domain: str) -> dict[str, str]:
+    dom = normalize_domain(domain)
+    if not dom:
+        return {
+            "akarank_top1m": "0",
+            "akarank_domain": "",
+            "akarank_rank": "",
+        }
+
+    parts = dom.split(".")
+    candidates = [
+        ".".join(parts[i:])
+        for i in range(len(parts))
+        if "." in ".".join(parts[i:])
+    ]
+
+    if not candidates:
+        return {
+            "akarank_top1m": "0",
+            "akarank_domain": "",
+            "akarank_rank": "",
+        }
+
+    pipe = r.pipeline()
+    for candidate in candidates:
+        pipe.hget(AKARANK_RANK_HASH, candidate)
+    raw = await pipe.execute()
+
+    for candidate, rank in zip(candidates, raw):
+        if rank:
+            return {
+                "akarank_top1m": "1",
+                "akarank_domain": candidate,
+                "akarank_rank": str(rank),
+            }
+
+    return {
+        "akarank_top1m": "0",
+        "akarank_domain": "",
+        "akarank_rank": "",
+    }
+
+
+async def apply_akarank_to_known_domains(batch: int = 1000) -> int:
+    updated = 0
+    cursor = 0
+
+    while True:
+        cursor, domains = await r.sscan(KNOWN_DOMAINS_SET, cursor=cursor, count=batch)
+
+        for dom in domains:
+            match = await get_akarank_match(dom)
+            await r.hset(f"greycode:domain:{dom}", mapping=match)
+            await sync_domain_indexes(r, dom)
+            updated += 1
+
+        if cursor == 0:
+            break
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    return updated
+
+
+async def maybe_fetch_akarank(run_reason: str) -> None:
+    if not await _get_akarank_enabled():
+        return
+
+    interval_min = await _get_akarank_interval_min()
+    meta = await r.hgetall(AKARANK_META_KEY)
+
+    last_fetch = 0.0
+    try:
+        last_fetch = float(meta.get("last_fetch_at") or 0.0)
+    except Exception:
+        last_fetch = 0.0
+
+    now = time.time()
+    due = run_reason == "startup" and last_fetch <= 0
+    due = due or ((now - last_fetch) >= interval_min * 60)
+
+    if not due:
+        return
+
+    url = await _get_akarank_url()
+    if not url:
+        return
+
+    print(f"[akarank] fetching url={url} reason={run_reason}", flush=True)
+
+    body = await asyncio.to_thread(_fetch_akarank_csv_sync, url)
+
+    reader = csv.DictReader(io.StringIO(body))
+    mapping: dict[str, str] = {}
+
+    for row in reader:
+        dom = normalize_domain(row.get("domain_name") or "")
+        rank = (row.get("output_rank") or "").strip()
+
+        if not dom or not rank:
+            continue
+
+        try:
+            rank_int = int(rank)
+        except ValueError:
+            continue
+
+        if rank_int < 1:
+            continue
+
+        mapping[dom] = str(rank_int)
+
+    if not mapping:
+        raise RuntimeError("AkaRank fetch returned no usable domains.")
+
+    pipe = r.pipeline()
+    pipe.delete(AKARANK_SET)
+    pipe.delete(AKARANK_RANK_HASH)
+    pipe.sadd(AKARANK_SET, *mapping.keys())
+    pipe.hset(AKARANK_RANK_HASH, mapping=mapping)
+    pipe.hset(
+        AKARANK_META_KEY,
+        mapping={
+            "last_fetch_at": str(now),
+            "last_fetch_by": "blacklist_worker",
+            "last_url": url,
+            "loaded": str(len(mapping)),
+        },
+    )
+    await pipe.execute()
+
+    updated_domains = await apply_akarank_to_known_domains()
+
+    print(
+        f"[akarank] loaded={len(mapping)} updated_known_domains={updated_domains}",
+        flush=True,
+    )
 
 
 async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
@@ -137,6 +325,8 @@ async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
 async def update_cycle(run_reason: str) -> None:
     interval_min = await _get_interval_min()
     batch = await _get_recheck_batch()
+
+    await maybe_fetch_akarank(run_reason=run_reason)
 
     vendors = await load_vendors(r)
 
