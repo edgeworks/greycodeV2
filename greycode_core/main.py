@@ -62,6 +62,11 @@ from user_store import (
     set_user_must_change_password,
     delete_user,
 )
+from akarank_engine import (
+    AKARANK_TOP1M_SET,
+    in_akarank_top1m,
+    refresh_akarank_top1m,
+)
 from invite_store import create_invite_token, validate_invite_token, mark_invite_used
 from indexes import (
     idx_z_last_seen,
@@ -126,6 +131,7 @@ GLOBAL_SCORE_EXCLUDE_IP_SET = "greycode:scoring:exclude:ip"
 GLOBAL_SCORE_EXCLUDE_DOMAIN_SET = "greycode:scoring:exclude:domain"
 GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY = "greycode:scoring:exclude:patterns"
 GLOBAL_SCORE_EXCLUDE_META_KEY = "greycode:scoring:exclude:meta"
+AKARANK_META_KEY = "greycode:akarank:meta"
 
 
 #DEBUG RELATED ------
@@ -309,6 +315,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "threatfox_api_key_enc": "",
 
     "filter_drop_single_label_dns": "1",
+    "akarank_enabled": "1",
+    "akarank_url": "https://www.akamai.com/pdata/akarank/prod/top1M.csv",
+    "akarank_update_interval_min": "1440",
 
     "vt_enabled": "0",
     "vt_budget_daily": "500",
@@ -426,10 +435,14 @@ async def load_settings() -> dict[str, Any]:
 
     s["vt_enabled_bool"] = (s.get("vt_enabled", "0") == "1")
     s["notify_email_enabled_bool"] = (s.get("notify_email_enabled", "0") == "1")
+    s["akarank_enabled_bool"] = (s.get("akarank_enabled", "0") == "1")
+    s["akarank_meta"] = await r.hgetall(AKARANK_META_KEY)
 
     s["manual_filters"] = await load_manual_filters()
 
     return s
+
+
 
 
 async def save_settings(mapping: dict[str, str]) -> None:
@@ -1269,6 +1282,7 @@ def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: st
         "tags": parse_tags_field(data.get("tags") or ""),
         "has_comment": has_comment(data),
         "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
+        "is_top1m": str(data.get("is_top1m") or "0") == "1",
     }
     return row
 
@@ -2445,6 +2459,8 @@ async def build_computer_indicator_rows(
                 row["driver"] = "RARE_IP"
                 rows_by_group["rare_ips"].append(row)
             elif kind == "domain" and is_rare:
+                if str(data.get("is_top1m") or "0") == "1":
+                    continue
                 row["driver"] = "RARE_DOMAIN"
                 rows_by_group["rare_domains"].append(row)
 
@@ -2911,6 +2927,49 @@ async def ui_settings_vt(request: Request, _auth=Depends(require_login)):
             "request": request,
             "settings": s,
             "saved": "vt",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+@app.post("/ui/settings/akarank")
+async def ui_settings_akarank(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
+    form = await request.form()
+    mapping = {
+        "akarank_enabled": "1" if (form.get("akarank_enabled") == "1") else "0",
+        "akarank_url": (form.get("akarank_url") or "").strip() or DEFAULT_SETTINGS["akarank_url"],
+        "akarank_update_interval_min": str(_safe_threshold(form.get("akarank_update_interval_min"), default=1440, lo=15, hi=10080)),
+    }
+    await save_settings(mapping)
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_akarank",
+        target_kind="settings",
+        target="akarank",
+        details={k: [prev.get(k), mapping.get(k)] for k in mapping},
+    )
+    if mapping["akarank_enabled"] == "1":
+        try:
+            await refresh_akarank_top1m(r)
+        except Exception:
+            pass
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request,
+        name="partials/settings_modal.html",
+        context={
+            "request": request,
+            "settings": s,
+            "saved": "akarank",
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
@@ -4415,6 +4474,7 @@ async def enrich_dns(event: DnsEvent):
     key = f"greycode:domain:{domain_norm}"
     now = datetime.datetime.utcnow().isoformat()
     now_epoch = time.time()
+    is_top1m = "1" if await in_akarank_top1m(r, domain_norm) else "0"
 
     vals = await r.hmget(key, "status", "listing_state", "source", "index_last_sync")
     exists = any(v is not None for v in vals)
@@ -4429,6 +4489,7 @@ async def enrich_dns(event: DnsEvent):
             mapping={
                 "last_seen": now,
                 "computer_last": event.Computer,
+                "is_top1m": is_top1m,
             },
         )
 
@@ -4473,6 +4534,7 @@ async def enrich_dns(event: DnsEvent):
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
             "index_last_sync": str(now_epoch),
+            "is_top1m": is_top1m,
         },
     )
     pipe.sadd(STAGED_SET_DOMAIN, domain_norm)
@@ -4658,6 +4720,11 @@ async def enrich_dns_bulk(request: Request):
         }
 
     pipe = r.pipeline()
+    top1m_pipe = r.pipeline()
+    for domain_norm in domains:
+        top1m_pipe.sismember(AKARANK_TOP1M_SET, domain_norm)
+    top1m_raw = await top1m_pipe.execute()
+    top1m_map = {dom: ("1" if bool(is_member) else "0") for dom, is_member in zip(domains, top1m_raw)}
 
     for domain_norm in domains:
         key = f"greycode:domain:{domain_norm}"
@@ -4676,6 +4743,7 @@ async def enrich_dns_bulk(request: Request):
                 mapping={
                     "last_seen": now,
                     "computer_last": computer_last,
+                    "is_top1m": top1m_map.get(domain_norm, "0"),
                 },
             )
 
@@ -4701,6 +4769,7 @@ async def enrich_dns_bulk(request: Request):
                     "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
                     "index_last_sync": str(now_epoch),
+                    "is_top1m": top1m_map.get(domain_norm, "0"),
                 },
             )
             pipe.sadd(STAGED_SET_DOMAIN, domain_norm)

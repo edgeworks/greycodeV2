@@ -92,6 +92,40 @@
 <div class="settings-separator"></div>
 
 <section class="settings-section">
+  <h2>AkaRank</h2>
+  <p class="muted">Akamai Top 1M feed for Sysmon 22 tagging and rare-domain suppression.</p>
+
+  <form
+    class="settings-form"
+    hx-post="/ui/settings/akarank"
+    hx-target="#settingsModalContent"
+    hx-swap="innerHTML">
+    <div class="settings-grid">
+      <label>Enable AkaRank
+        <select name="akarank_enabled">
+          <option value="1" {% if settings.akarank_enabled_bool %}selected{% endif %}>Enabled</option>
+          <option value="0" {% if not settings.akarank_enabled_bool %}selected{% endif %}>Disabled</option>
+        </select>
+      </label>
+      <label>Update interval (minutes)
+        <input type="number" min="15" max="10080" step="1" name="akarank_update_interval_min" value="{{ settings.akarank_update_interval_min or 1440 }}">
+      </label>
+      <label>AkaRank URL
+        <input type="url" name="akarank_url" value="{{ settings.akarank_url }}">
+      </label>
+    </div>
+    {% if settings.akarank_meta %}
+      <div class="hint muted">Last success: {{ settings.akarank_meta.last_success_at or "-" }} • Entries: {{ settings.akarank_meta.size or "-" }}</div>
+    {% endif %}
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save AkaRank</button>
+    </div>
+  </form>
+</section>
+
+<div class="settings-separator"></div>
+
+<section class="settings-section">
   <h2>VirusTotal API</h2>
   <p class="muted">Key, budgets, and runtime enablement</p>
 
