@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from typing import List, Tuple
 import redis.asyncio as redis
 
@@ -18,6 +17,7 @@ from greycode_core.blacklist_engine import (
     check_indicator_hits,
     update_indicator_record,
 )
+from greycode_core.akarank_engine import refresh_akarank_if_due
 
 CFG_KEY = "greycode:cfg"
 KNOWN_IPS_SET = "greycode:known:ips"
@@ -151,6 +151,7 @@ async def update_cycle(run_reason: str) -> None:
     vendors = new_vendors
 
     await recheck_all_indicators(vendors, batch=batch)
+    await refresh_akarank_if_due(r)
 
 
 async def worker_loop() -> None:
