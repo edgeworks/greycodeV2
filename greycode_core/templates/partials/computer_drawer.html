@@ -309,5 +309,145 @@
         </details>
       {% endfor %}
     </section>
+    <div class="settings-separator"></div>
+
+    <section class="computer-driver-list">
+      <h2 style="margin-top:0;">Exclusions</h2>
+      <p class="muted">
+        These indicators are currently not contributing to this computer's noticeable score.
+      </p>
+
+      <details class="computer-driver-group">
+        <summary>
+          <span>Excluded from this computer</span>
+          <span class="badge">{{ local_exclusions|length }}</span>
+        </summary>
+
+        <div class="computer-driver-group-body">
+          {% if local_exclusions %}
+            <div class="computer-indicator-list">
+              {% for row in local_exclusions %}
+                <div class="computer-indicator-card">
+                  <div class="computer-exclusion-row">
+                    <div class="computer-exclusion-main">
+                      <span class="badge">{{ row.kind_label }}</span>
+                      <span class="badge">LOCAL</span>
+
+                      {% if row.kind == "sha256" %}
+                        <span class="computer-indicator-text">
+                          <span class="mono" title="{{ row.image or row.indicator }}">
+                            {{ row.image or row.indicator_short }}
+                          </span>
+                          <span class="muted mono" title="{{ row.indicator }}">
+                            {{ row.indicator_short }}
+                          </span>
+                        </span>
+                      {% else %}
+                        <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                      {% endif %}
+
+                      <span class="muted">
+                        local {{ row.local_count }} • org computers {{ row.org_computer_count }}
+                      </span>
+                    </div>
+
+                    {% if can_triage %}
+                      <form hx-post="/ui/computer/{{ computer }}/include"
+                            hx-target="#drawer"
+                            hx-swap="innerHTML"
+                            hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                        <input type="hidden" name="kind" value="{{ row.kind }}">
+                        <input type="hidden" name="indicator" value="{{ row.indicator }}">
+                        <button class="btn primary" type="submit">Include in score</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="analyze-empty">No local exclusions for this computer.</div>
+          {% endif %}
+        </div>
+      </details>
+
+      <details class="computer-driver-group">
+        <summary>
+          <span>Global scoring exclusions affecting this computer</span>
+          <span class="badge">{{ global_exclusions|length }}</span>
+        </summary>
+
+        <div class="computer-driver-group-body">
+          {% if global_exclusions %}
+            <div class="computer-indicator-list">
+              {% for row in global_exclusions %}
+                <div class="computer-indicator-card">
+                  <div class="computer-exclusion-row">
+                    <div class="computer-exclusion-main">
+                      <span class="badge">{{ row.kind_label }}</span>
+
+                      {% if row.scope == "global_pattern" %}
+                        <span class="badge match-rare">GLOBAL PATTERN</span>
+                        <span class="badge">{{ row.pattern_kind }}</span>
+                      {% else %}
+                        <span class="badge match-rare">GLOBAL EXACT</span>
+                      {% endif %}
+
+                      {% if row.kind == "sha256" %}
+                        <span class="computer-indicator-text">
+                          <span class="mono" title="{{ row.image or row.indicator }}">
+                            {{ row.image or row.indicator_short }}
+                          </span>
+                          <span class="muted mono" title="{{ row.indicator }}">
+                            {{ row.indicator_short }}
+                          </span>
+                        </span>
+                      {% else %}
+                        <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                      {% endif %}
+
+                      {% if row.scope == "global_pattern" %}
+                        <span class="muted mono" title="{{ row.pattern }}">
+                          matched pattern: {{ row.pattern }}
+                        </span>
+                      {% endif %}
+
+                      <span class="muted">
+                        local {{ row.local_count }} • org computers {{ row.org_computer_count }}
+                      </span>
+                    </div>
+
+                    {% if can_triage %}
+                      {% if row.scope == "global_pattern" %}
+                        <form hx-post="/ui/computer/{{ computer }}/remove-global-pattern"
+                              hx-target="#drawer"
+                              hx-swap="innerHTML"
+                              hx-confirm="Remove this global pattern exclusion? This may affect many computer scores."
+                              hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                          <input type="hidden" name="pattern_id" value="{{ row.pattern_id }}">
+                          <button class="btn danger" type="submit">Remove global pattern</button>
+                        </form>
+                      {% else %}
+                        <form hx-post="/ui/computer/{{ computer }}/remove-global-exact"
+                              hx-target="#drawer"
+                              hx-swap="innerHTML"
+                              hx-confirm="Remove this global exact exclusion? This may affect many computer scores."
+                              hx-on:htmx:afterRequest="gcRefreshComputerTable()">
+                          <input type="hidden" name="kind" value="{{ row.kind }}">
+                          <input type="hidden" name="indicator" value="{{ row.indicator }}">
+                          <button class="btn danger" type="submit">Remove global exclusion</button>
+                        </form>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="analyze-empty">No global scoring exclusions affect this computer.</div>
+          {% endif %}
+        </div>
+      </details>
+    </section>
   </div>
 </div>

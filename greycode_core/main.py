@@ -1156,6 +1156,46 @@ async def indicator_is_globally_score_excluded(
         patterns=patterns,
     )
 
+async def matching_global_score_patterns(
+    *,
+    kind: str,
+    indicator: str,
+    data: dict[str, str] | None = None,
+    patterns: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    rules = patterns if patterns is not None else await load_global_score_patterns()
+    matches: list[dict[str, str]] = []
+
+    if kind == "sha256":
+        image = (data or {}).get("image") or ""
+        if not image:
+            return []
+
+        for rule in rules:
+            if rule.get("kind") == "image" and manual_filter_matches("image", rule.get("pattern") or "", image):
+                matches.append(rule)
+
+    elif kind == "ip":
+        try:
+            ip_norm = normalize_ip(indicator)
+        except ValueError:
+            return []
+
+        for rule in rules:
+            if rule.get("kind") == "ip" and manual_filter_matches("ip", rule.get("pattern") or "", ip_norm):
+                matches.append(rule)
+
+    elif kind == "domain":
+        dom = normalize_domain(indicator)
+        if not dom:
+            return []
+
+        for rule in rules:
+            if rule.get("kind") == "domain" and manual_filter_matches("domain", rule.get("pattern") or "", dom):
+                matches.append(rule)
+
+    return matches
+
 def fmt_epoch(ts: Optional[str]) -> str:
     if not ts:
         return "-"
@@ -2260,6 +2300,13 @@ async def build_computer_indicator_rows(
     excluded_ip = set(await r.smembers(computer_excluded_set(computer_norm, "ip")))
     excluded_domain = set(await r.smembers(computer_excluded_set(computer_norm, "domain")))
 
+    global_exact_sha = set(await r.smembers(global_score_exclude_set("sha256")))
+    global_exact_ip = set(await r.smembers(global_score_exclude_set("ip")))
+    global_exact_domain = set(await r.smembers(global_score_exclude_set("domain")))
+
+    manual_filters = await load_manual_filters()
+    global_patterns = await load_global_score_patterns()
+
     rows_by_group: dict[str, list[dict[str, Any]]] = {
         "rare_unknown_hashes": [],
         "red_indicators": [],
@@ -2267,15 +2314,14 @@ async def build_computer_indicator_rows(
         "rare_hashes": [],
         "rare_ips": [],
         "rare_domains": [],
-        "excluded": [],
     }
 
-    async def add_kind_rows(kind: str, indicators: list[str], excluded_set: set[str]) -> None:
+    local_exclusions: list[dict[str, Any]] = []
+    global_exclusions: list[dict[str, Any]] = []
+
+    async def add_kind_rows(kind: str, indicators: list[str], excluded_set: set[str], global_exact_set: set[str]) -> None:
         if not indicators:
             return
-        
-        manual_filters = await load_manual_filters()
-        global_patterns = await load_global_score_patterns()
 
         counts_key = computer_indicator_counts(computer_norm, kind)
 
@@ -2304,21 +2350,11 @@ async def build_computer_indicator_rows(
             exclusion_meta_raw = raw[pos] or ""
             pos += 1
 
-            if await indicator_is_filtered_for_scoring(
-                kind=kind,
-                indicator=indicator,
-                data=data,
-                manual_filters=manual_filters,
-                global_patterns=global_patterns,
-            ):
-                continue
-
             status = (data.get("status") or "GREY").upper()
             vt_state = (data.get("vt_state") or "").upper()
             listing_state = (data.get("listing_state") or "").upper()
             org_count_total = int(data.get("count_total") or 0)
             is_rare = org_computer_count > 0 and org_computer_count <= rare_threshold
-            is_excluded = indicator in excluded_set
 
             row = {
                 "kind": kind,
@@ -2330,7 +2366,7 @@ async def build_computer_indicator_rows(
                 "org_count_total": org_count_total,
                 "org_computer_count": org_computer_count,
                 "is_rare": is_rare,
-                "is_excluded": is_excluded,
+                "is_excluded": False,
                 "status": status,
                 "vt_state": vt_state,
                 "vt_malicious": int(data.get("vt_malicious") or 0),
@@ -2345,10 +2381,52 @@ async def build_computer_indicator_rows(
                 "ticket_id": data.get("ticket_id") or "",
                 "open_url": open_url_for_indicator(kind, indicator),
                 "exclusion_meta_raw": exclusion_meta_raw,
+                "scope": "",
+                "pattern": "",
+                "pattern_id": "",
+                "pattern_kind": "",
             }
 
-            if is_excluded:
-                rows_by_group["excluded"].append(row)
+            # 1. Local computer-scoped exact exclusion
+            if indicator in excluded_set:
+                row["is_excluded"] = True
+                row["scope"] = "local"
+                local_exclusions.append(row)
+                continue
+
+            # 2. Global exact exclusion
+            if indicator in global_exact_set:
+                row["is_excluded"] = True
+                row["scope"] = "global_exact"
+                global_exclusions.append(row)
+                continue
+
+            # 3. Global pattern exclusion
+            matched_patterns = await matching_global_score_patterns(
+                kind=kind,
+                indicator=indicator,
+                data=data,
+                patterns=global_patterns,
+            )
+            if matched_patterns:
+                for pattern_rule in matched_patterns:
+                    pattern_row = dict(row)
+                    pattern_row["is_excluded"] = True
+                    pattern_row["scope"] = "global_pattern"
+                    pattern_row["pattern"] = pattern_rule.get("pattern") or ""
+                    pattern_row["pattern_id"] = pattern_rule.get("id") or ""
+                    pattern_row["pattern_kind"] = pattern_rule.get("kind") or ""
+                    global_exclusions.append(pattern_row)
+                continue
+
+            # 4. Manual ingest filters / DNS hygiene
+            if await indicator_is_filtered_for_scoring(
+                kind=kind,
+                indicator=indicator,
+                data=data,
+                manual_filters=manual_filters,
+                global_patterns=global_patterns,
+            ):
                 continue
 
             if kind == "sha256" and is_rare and vt_state == "NOT_FOUND":
@@ -2370,18 +2448,25 @@ async def build_computer_indicator_rows(
                 row["driver"] = "RARE_DOMAIN"
                 rows_by_group["rare_domains"].append(row)
 
-    await add_kind_rows("sha256", sha_values, excluded_sha)
-    await add_kind_rows("ip", ip_values, excluded_ip)
-    await add_kind_rows("domain", domain_values, excluded_domain)
+    await add_kind_rows("sha256", sha_values, excluded_sha, global_exact_sha)
+    await add_kind_rows("ip", ip_values, excluded_ip, global_exact_ip)
+    await add_kind_rows("domain", domain_values, excluded_domain, global_exact_domain)
 
-    for group_rows in rows_by_group.values():
-        group_rows.sort(
+    def sort_rows(rows: list[dict[str, Any]]) -> None:
+        rows.sort(
             key=lambda x: (
                 -int(x.get("local_count") or 0),
                 int(x.get("org_computer_count") or 999999),
                 x.get("indicator") or "",
+                x.get("pattern") or "",
             )
         )
+
+    for group_rows in rows_by_group.values():
+        sort_rows(group_rows)
+
+    sort_rows(local_exclusions)
+    sort_rows(global_exclusions)
 
     groups = [
         {
@@ -2420,18 +2505,14 @@ async def build_computer_indicator_rows(
             "hint": "DNS names seen on few computers.",
             "rows": rows_by_group["rare_domains"],
         },
-        {
-            "key": "excluded",
-            "title": "Excluded from score",
-            "hint": "Indicators excluded from this computer's noticeable score.",
-            "rows": rows_by_group["excluded"],
-        },
     ]
 
     return {
         "groups": groups,
-        "total_contributors": sum(len(g["rows"]) for g in groups if g["key"] != "excluded"),
-        "excluded_count": len(rows_by_group["excluded"]),
+        "total_contributors": sum(len(g["rows"]) for g in groups),
+        "excluded_count": len(local_exclusions) + len(global_exclusions),
+        "local_exclusions": local_exclusions,
+        "global_exclusions": global_exclusions,
     }
 
 
@@ -5347,6 +5428,8 @@ async def ui_computer_drawer(
             "groups": contributors["groups"],
             "total_contributors": contributors["total_contributors"],
             "excluded_count": contributors["excluded_count"],
+            "local_exclusions": contributors["local_exclusions"],
+            "global_exclusions": contributors["global_exclusions"],
             "rare_threshold": rare_threshold,
             "can_triage": can_triage(request),
             "can_delete": can_delete(request),
@@ -5602,6 +5685,87 @@ async def ui_computer_exclude_pattern(
         target=pattern_norm,
         details={"already_existed": exists},
     )
+
+    return await ui_computer_drawer(request, computer_norm)
+
+@app.post("/ui/computer/{computer}/remove-global-exact", response_class=HTMLResponse)
+async def ui_computer_remove_global_exact(
+    request: Request,
+    computer: str,
+    kind: str = Form(...),
+    indicator: str = Form(...),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    kind = (kind or "").strip().lower()
+
+    if kind not in {"sha256", "ip", "domain"}:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+
+    if kind == "ip":
+        indicator = normalize_ip(indicator)
+    elif kind == "domain":
+        indicator = normalize_domain(indicator)
+        if not indicator:
+            raise HTTPException(status_code=400, detail="Invalid domain")
+    else:
+        indicator = (indicator or "").strip().upper()
+
+    await r.srem(global_score_exclude_set(kind), indicator)
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="computer",
+        action="remove_global_exact_score_exclusion",
+        target_kind=kind,
+        target=indicator,
+        details={},
+    )
+
+    return await ui_computer_drawer(request, computer_norm)
+
+
+@app.post("/ui/computer/{computer}/remove-global-pattern", response_class=HTMLResponse)
+async def ui_computer_remove_global_pattern(
+    request: Request,
+    computer: str,
+    pattern_id: str = Form(...),
+    _auth=Depends(require_login),
+):
+    require_triage(request)
+
+    computer_norm = normalize_computer(computer)
+    pattern_id = (pattern_id or "").strip()
+
+    patterns = await load_global_score_patterns()
+    removed = next((p for p in patterns if (p.get("id") or "") == pattern_id), None)
+    keep = [p for p in patterns if (p.get("id") or "") != pattern_id]
+
+    if removed:
+        await save_global_score_patterns(keep)
+
+        computers = await r.smembers(KNOWN_COMPUTERS_SET)
+        if computers:
+            await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+        await audit_log(
+            r,
+            actor=current_username(request),
+            actor_role=current_role(request),
+            category="computer",
+            action="remove_global_pattern_score_exclusion",
+            target_kind=removed.get("kind") or "",
+            target=removed.get("pattern") or "",
+            details={"pattern_id": pattern_id},
+        )
 
     return await ui_computer_drawer(request, computer_norm)
 

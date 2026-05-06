@@ -2373,6 +2373,29 @@ input[type="checkbox"] {
   max-width: 100%;
 }
 
+.computer-exclusion-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px;
+}
+
+.computer-exclusion-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .computer-exclusion-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 @media (max-width: 760px) {
   .computer-indicator-card > summary {
     flex-direction: column;
