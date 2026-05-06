@@ -969,6 +969,12 @@ th.sortable .sortlink:hover {
   border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
 }
 
+.badge.top1m-badge {
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 58%, var(--border));
+  font-weight: 800;
+}
+
 .ROW_PENDING td,
 .GREY td { background: var(--neutral-soft); }
 

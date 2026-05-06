@@ -1,0 +1,31 @@
+<div class="settings-modal-shell">
+  <div class="settings-modal-topbar">
+    <div>
+      <h1>AkaRank Top 1M preview</h1>
+      <p class="muted">
+        Loaded domains: {{ preview.total }}
+        {% if preview.meta.get("last_fetch_at") %}
+          • Last fetch epoch: {{ preview.meta.get("last_fetch_at") }}
+        {% endif %}
+      </p>
+    </div>
+
+    <button class="settings-modal-close" type="button" onclick="gcCloseVendorPreviewModal()">×</button>
+  </div>
+
+  <div class="vendor-preview-meta">
+    {% if preview.truncated %}
+      <span class="badge">Showing first {{ preview.items|length }}</span>
+    {% endif %}
+  </div>
+
+  {% if preview.items %}
+    <div class="vendor-preview-box">
+{% for item in preview.items -%}
+{{ item.rank }}	{{ item.domain }}
+{% endfor %}
+    </div>
+  {% else %}
+    <div class="vendor-preview-empty">No AkaRank data loaded yet.</div>
+  {% endif %}
+</div>

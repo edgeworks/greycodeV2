@@ -20,6 +20,13 @@
       {% endif %}
     {% endif %}
 
+    {% if tab == 22 and data.get("akarank_top1m") == "1" %}
+      <span class="badge top1m-badge"
+            title="{% if data.get('akarank_domain') %}{{ data.get('akarank_domain') }}{% endif %}{% if data.get('akarank_rank') %} rank {{ data.get('akarank_rank') }}{% endif %}">
+        Top1M
+      </span>
+    {% endif %}
+
     {% if data.get("disposition") %}
       {% set disp = data.get("disposition")|upper %}
       {% if disp == "ACCEPTED" %}
@@ -94,6 +101,19 @@
         <div class="fact span2">
           <div class="k">Ticket</div>
           <div class="v wrap">{{ data.get("ticket_id","") or "-" }}</div>
+        </div>
+      {% endif %}
+
+      {% if tab == 22 %}
+        <div class="fact">
+          <div class="k">AkaRank</div>
+          <div class="v mono">
+            {% if data.get("akarank_top1m") == "1" %}
+              Top1M{% if data.get("akarank_domain") %}: {{ data.get("akarank_domain") }}{% endif %}{% if data.get("akarank_rank") %} #{{ data.get("akarank_rank") }}{% endif %}
+            {% else %}
+              -
+            {% endif %}
+          </div>
         </div>
       {% endif %}
     </div>

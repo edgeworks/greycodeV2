@@ -86,8 +86,77 @@
     <div class="settings-actions">
       <button class="btn primary" type="submit">Save Blacklists</button>
     </div>
+
+
   </form>
 </section>
+
+<div class="settings-separator"></div>
+
+<div class="settings-block">
+  <div class="settings-subtitle">AkaRank Top 1M</div>
+
+  <form class="settings-form"
+        hx-post="/ui/settings/akarank"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+
+    <div class="settings-row">
+      <label>
+        Update interval minutes
+        <input name="akarank_update_interval_min"
+               type="number"
+               min="60"
+               max="10080"
+               value="{{ settings.get('akarank_update_interval_min', '1440') }}">
+        <span class="hint muted">How often the AkaRank feed should be refreshed by the updater.</span>
+      </label>
+    </div>
+
+    <div class="vendor-row-wide">
+      <label class="switch">
+        <input type="checkbox"
+               name="akarank_enabled"
+               value="1"
+               {% if settings.get('akarank_enabled', '1') == '1' %}checked{% endif %}>
+        <span class="slider"></span>
+      </label>
+
+      <div class="vendor-name">AkaRank Top 1M</div>
+
+      <input class="vendor-url"
+             name="akarank_url"
+             value="{{ settings.get('akarank_url', 'https://www.akamai.com/pdata/akarank/prod/top1M.csv') }}"
+             placeholder="https://www.akamai.com/pdata/akarank/prod/top1M.csv">
+
+      <div class="vendor-actions">
+        <button class="btn primary" type="submit">Save</button>
+
+        <button class="btn"
+                type="button"
+                hx-post="/ui/settings/akarank/fetch"
+                hx-target="#settingsModalContent"
+                hx-swap="innerHTML">
+          Fetch now
+        </button>
+
+        <a class="btn"
+           href="/ui/settings/akarank/preview"
+           hx-get="/ui/settings/akarank/preview"
+           hx-target="#vendorPreviewContent"
+           hx-swap="innerHTML"
+           hx-on:click="event.preventDefault()">
+          View
+        </a>
+      </div>
+    </div>
+
+    <p class="hint muted">
+      Domains in AkaRank Top 1M are marked with a Top1M badge in Sysmon 22.
+      They and their subdomains are excluded from Computer rare-domain scoring.
+    </p>
+  </form>
+</div>
 
 <div class="settings-separator"></div>
 

@@ -187,6 +187,13 @@
               {% endif %}
             {% endif %}
 
+            {% if tab == 22 and row.akarank_top1m %}
+              <span class="badge top1m-badge"
+                    title="AkaRank Top 1M{% if row.akarank_domain %}: {{ row.akarank_domain }}{% endif %}{% if row.akarank_rank %} rank {{ row.akarank_rank }}{% endif %}">
+                Top1M
+              </span>
+            {% endif %}
+            
             {% if row.has_comment %}
               <span class="badge note-badge" title="Comment present">💬</span>
             {% endif %}

@@ -26,6 +26,9 @@ import base64
 import hashlib
 import hmac
 import fnmatch
+import csv
+import io
+import urllib.request
 from typing import Optional, Any
 from cryptography.fernet import Fernet, InvalidToken
 import smtplib
@@ -126,7 +129,9 @@ GLOBAL_SCORE_EXCLUDE_IP_SET = "greycode:scoring:exclude:ip"
 GLOBAL_SCORE_EXCLUDE_DOMAIN_SET = "greycode:scoring:exclude:domain"
 GLOBAL_SCORE_EXCLUDE_PATTERNS_KEY = "greycode:scoring:exclude:patterns"
 GLOBAL_SCORE_EXCLUDE_META_KEY = "greycode:scoring:exclude:meta"
-
+AKARANK_SET = "greycode:akarank:top1m"
+AKARANK_RANK_HASH = "greycode:akarank:rank"
+AKARANK_META_KEY = "greycode:akarank:meta"
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -314,6 +319,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "vt_budget_daily": "500",
     "vt_budget_per_min": "3",
     "vt_api_key_enc": "",
+
+    "akarank_enabled": "1",
+    "akarank_url": "https://www.akamai.com/pdata/akarank/prod/top1M.csv",
+    "akarank_update_interval_min": "1440",
 
     "notify_email_enabled": "0",
     "notify_email_to": "",
@@ -509,6 +518,9 @@ async def indicator_is_filtered_for_scoring(
             return True
 
         if await drop_single_label_dns_setting() and is_single_label_domain(dom):
+            return True
+
+        if (data or {}).get("akarank_top1m") == "1":
             return True
 
         return value_matches_any_manual_filter(filters, "domain", dom)
@@ -937,6 +949,192 @@ def normalize_domain(qname: str) -> str:
         d = d[:-1]
     return d
 
+async def akarank_enabled_setting() -> bool:
+    return await cfg_get_bool(r, "akarank_enabled", default=True)
+
+
+async def get_akarank_match(domain: str) -> dict[str, str]:
+    """
+    Returns match info for exact domain or parent suffix.
+    Example:
+      server1.google.com -> google.com if google.com is in AkaRank.
+    """
+    dom = normalize_domain(domain)
+    if not dom:
+        return {}
+
+    parts = dom.split(".")
+    candidates = [".".join(parts[i:]) for i in range(len(parts)) if "." in ".".join(parts[i:])]
+
+    if not candidates:
+        return {}
+
+    pipe = r.pipeline()
+    for candidate in candidates:
+        pipe.hget(AKARANK_RANK_HASH, candidate)
+    raw = await pipe.execute()
+
+    for candidate, rank in zip(candidates, raw):
+        if rank:
+            return {
+                "akarank_top1m": "1",
+                "akarank_domain": candidate,
+                "akarank_rank": str(rank),
+            }
+
+    return {
+        "akarank_top1m": "0",
+        "akarank_domain": "",
+        "akarank_rank": "",
+    }
+
+
+async def apply_akarank_to_domain_record(domain: str) -> None:
+    dom = normalize_domain(domain)
+    if not dom:
+        return
+
+    key = f"greycode:domain:{dom}"
+    data = await r.hgetall(key)
+    if not data:
+        return
+
+    if not await akarank_enabled_setting():
+        await r.hset(
+            key,
+            mapping={
+                "akarank_top1m": "0",
+                "akarank_domain": "",
+                "akarank_rank": "",
+            },
+        )
+        return
+
+    match = await get_akarank_match(dom)
+    if match:
+        await r.hset(key, mapping=match)
+
+
+def _fetch_akarank_csv_sync(url: str, timeout: int = 60) -> str:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Greycode/akarank-fetcher",
+            "Accept": "text/csv,*/*",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+async def fetch_akarank_now(actor: str = "system") -> dict[str, Any]:
+    s = await load_settings()
+
+    enabled = (s.get("akarank_enabled", "1") == "1")
+    if not enabled:
+        return {
+            "enabled": False,
+            "changed": False,
+            "loaded": 0,
+            "message": "AkaRank is disabled.",
+        }
+
+    url = (s.get("akarank_url") or "").strip()
+    if not url:
+        raise RuntimeError("AkaRank URL is empty.")
+
+    body = await asyncio.to_thread(_fetch_akarank_csv_sync, url)
+
+    reader = csv.DictReader(io.StringIO(body))
+    mapping: dict[str, str] = {}
+
+    for row in reader:
+        dom = normalize_domain(row.get("domain_name") or "")
+        rank = (row.get("output_rank") or "").strip()
+
+        if not dom or not rank:
+            continue
+
+        try:
+            rank_int = int(rank)
+        except ValueError:
+            continue
+
+        if rank_int < 1:
+            continue
+
+        mapping[dom] = str(rank_int)
+
+    if not mapping:
+        raise RuntimeError("AkaRank fetch returned no usable domains.")
+
+    pipe = r.pipeline()
+    pipe.delete(AKARANK_SET)
+    pipe.delete(AKARANK_RANK_HASH)
+    pipe.sadd(AKARANK_SET, *mapping.keys())
+    pipe.hset(AKARANK_RANK_HASH, mapping=mapping)
+    pipe.hset(
+        AKARANK_META_KEY,
+        mapping={
+            "last_fetch_at": str(time.time()),
+            "last_fetch_by": actor,
+            "last_url": url,
+            "loaded": str(len(mapping)),
+        },
+    )
+    await pipe.execute()
+
+    # Apply current AkaRank state to existing known domains.
+    known_domains = sorted(await r.smembers(KNOWN_DOMAINS_SET))
+    for i in range(0, len(known_domains), 500):
+        batch = known_domains[i:i + 500]
+        pipe = r.pipeline()
+
+        # Use direct calls here because suffix matching requires ordered checks.
+        # This is intentionally simple for v1.
+        for dom in batch:
+            match = await get_akarank_match(dom)
+            pipe.hset(
+                f"greycode:domain:{dom}",
+                mapping=match or {
+                    "akarank_top1m": "0",
+                    "akarank_domain": "",
+                    "akarank_rank": "",
+                },
+            )
+            pipe.sadd(INDEX_DIRTY_DOMAIN_SET, dom)
+
+        await pipe.execute()
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    return {
+        "enabled": True,
+        "changed": True,
+        "loaded": len(mapping),
+        "url": url,
+    }
+
+
+async def get_akarank_preview(limit: int = 500) -> dict[str, Any]:
+    meta = await r.hgetall(AKARANK_META_KEY)
+    total = int(await r.scard(AKARANK_SET) or 0)
+
+    raw = await r.hgetall(AKARANK_RANK_HASH)
+    items = sorted(
+        [{"domain": d, "rank": int(rank)} for d, rank in raw.items() if str(rank).isdigit()],
+        key=lambda x: x["rank"],
+    )[:limit]
+
+    return {
+        "meta": meta,
+        "total": total,
+        "items": items,
+        "truncated": total > len(items),
+    }
+
 def normalize_computer(computer: str) -> str:
     return (computer or "").strip().lower().rstrip(".")
 
@@ -1268,6 +1466,9 @@ def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: st
         "image": data.get("image") or "",
         "tags": parse_tags_field(data.get("tags") or ""),
         "has_comment": has_comment(data),
+        "akarank_top1m": (data.get("akarank_top1m") or "0") == "1",
+        "akarank_domain": data.get("akarank_domain") or "",
+        "akarank_rank": data.get("akarank_rank") or "",
         "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
     }
     return row
@@ -2847,6 +3048,116 @@ async def ui_vendor_preview(
         },
     )
 
+@app.post("/ui/settings/akarank")
+async def ui_settings_akarank(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+
+    actor = current_username(request)
+    actor_role = current_role(request)
+    prev = await load_settings()
+    form = await request.form()
+
+    enabled = "1" if form.get("akarank_enabled") == "1" else "0"
+    url = (form.get("akarank_url") or "").strip()
+
+    def as_int_str(v: str, default: str, lo: int, hi: int) -> str:
+        try:
+            n = int((v or default).strip())
+            return str(max(lo, min(hi, n)))
+        except Exception:
+            return default
+
+    interval = as_int_str(
+        form.get("akarank_update_interval_min"),
+        "1440",
+        60,
+        10080,
+    )
+
+    await save_settings({
+        "akarank_enabled": enabled,
+        "akarank_url": url,
+        "akarank_update_interval_min": interval,
+    })
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    await audit_log(
+        r,
+        actor=actor,
+        actor_role=actor_role,
+        category="settings",
+        action="update_akarank",
+        target_kind="settings",
+        target="akarank",
+        details={
+            "akarank_enabled": [prev.get("akarank_enabled"), enabled],
+            "akarank_url": [prev.get("akarank_url"), url],
+            "akarank_update_interval_min": [prev.get("akarank_update_interval_min"), interval],
+        },
+    )
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": "akarank",
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.post("/ui/settings/akarank/fetch")
+async def ui_settings_akarank_fetch(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+
+    err = ""
+    try:
+        result = await fetch_akarank_now(actor=current_username(request))
+        saved = f"akarank_fetch:{result.get('loaded', 0)}"
+    except Exception as e:
+        err = str(e)
+        saved = ""
+
+    s = await load_settings()
+    preview = await get_akarank_preview(limit=20)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": saved,
+            "err": err,
+            "akarank_preview": preview,
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.get("/ui/settings/akarank/preview", response_class=HTMLResponse)
+async def ui_settings_akarank_preview(request: Request, _auth=Depends(require_login)):
+    preview = await get_akarank_preview(limit=500)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/akarank_preview_modal.html",
+        context={
+            "preview": preview,
+        },
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def root(_auth=Depends(require_login)):
     return RedirectResponse(url="/ui", status_code=302)
@@ -4405,16 +4716,27 @@ async def enrich_dns(event: DnsEvent):
         raise HTTPException(status_code=400, detail="Invalid QueryName")
 
     manual_filters = await load_manual_filters()
-    if value_matches_any_manual_filter(manual_filters, "domain", domain_norm):
+    should_filter, filter_reason = await should_filter_dns_ingest(domain_norm, manual_filters)
+    if should_filter:
         return {
             "query_name": domain_norm,
             "filtered": True,
             "filter_kind": "domain",
+            "filter_reason": filter_reason,
         }
 
     key = f"greycode:domain:{domain_norm}"
     now = datetime.datetime.utcnow().isoformat()
     now_epoch = time.time()
+
+    if await akarank_enabled_setting():
+        akarank_match = await get_akarank_match(domain_norm)
+    else:
+        akarank_match = {
+            "akarank_top1m": "0",
+            "akarank_domain": "",
+            "akarank_rank": "",
+        }
 
     vals = await r.hmget(key, "status", "listing_state", "source", "index_last_sync")
     exists = any(v is not None for v in vals)
@@ -4429,6 +4751,7 @@ async def enrich_dns(event: DnsEvent):
             mapping={
                 "last_seen": now,
                 "computer_last": event.Computer,
+                **akarank_match,
             },
         )
 
@@ -4456,6 +4779,7 @@ async def enrich_dns(event: DnsEvent):
             "listing_state": listing_state or "",
             "source": source or "",
             "computer_last": event.Computer,
+            **akarank_match,
         }
 
     pipe = r.pipeline()
@@ -4473,6 +4797,7 @@ async def enrich_dns(event: DnsEvent):
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
             "index_last_sync": str(now_epoch),
+            **akarank_match,
         },
     )
     pipe.sadd(STAGED_SET_DOMAIN, domain_norm)
@@ -4498,6 +4823,7 @@ async def enrich_dns(event: DnsEvent):
         "listing_state": "PENDING",
         "source": "pending",
         "computer_first": event.Computer,
+        **akarank_match,
     }
 
 
@@ -4535,6 +4861,7 @@ async def enrich_dns_bulk(request: Request):
             parsed = json.loads(body_text)
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
         if isinstance(parsed, list):
             events = parsed
         elif isinstance(parsed, dict):
@@ -4633,6 +4960,19 @@ async def enrich_dns_bulk(request: Request):
     now_epoch = time.time()
     domains = list(aggregated.keys())
 
+    akarank_enabled = await akarank_enabled_setting()
+    akarank_by_domain: dict[str, dict[str, str]] = {}
+
+    for domain_norm in domains:
+        if akarank_enabled:
+            akarank_by_domain[domain_norm] = await get_akarank_match(domain_norm)
+        else:
+            akarank_by_domain[domain_norm] = {
+                "akarank_top1m": "0",
+                "akarank_domain": "",
+                "akarank_rank": "",
+            }
+
     pipe = r.pipeline()
     for domain_norm in domains:
         key = f"greycode:domain:{domain_norm}"
@@ -4666,6 +5006,7 @@ async def enrich_dns_bulk(request: Request):
         count = int(agg["count"])
         computer_first = agg["computer_first"]
         computer_last = agg["computer_last"]
+        akarank_match = akarank_by_domain.get(domain_norm, {})
 
         if meta["exists"]:
             existing_count += count
@@ -4676,6 +5017,7 @@ async def enrich_dns_bulk(request: Request):
                 mapping={
                     "last_seen": now,
                     "computer_last": computer_last,
+                    **akarank_match,
                 },
             )
 
@@ -4701,6 +5043,7 @@ async def enrich_dns_bulk(request: Request):
                     "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
                     "index_last_sync": str(now_epoch),
+                    **akarank_match,
                 },
             )
             pipe.sadd(STAGED_SET_DOMAIN, domain_norm)

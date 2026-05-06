@@ -484,6 +484,9 @@ async def indicator_is_filtered_for_scoring(
         if await drop_single_label_dns_setting_from_redis(r) and is_single_label_domain(dom):
             return True
 
+        if (data or {}).get("akarank_top1m") == "1":
+            return True
+
         return any(
             f.get("kind") == "domain" and manual_filter_matches("domain", f.get("pattern") or "", dom)
             for f in manual_filters
