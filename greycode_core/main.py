@@ -1125,6 +1125,61 @@ async def fetch_akarank_now(actor: str = "system") -> dict[str, Any]:
         "url": url,
     }
 
+async def import_akarank_csv_text(body: str, actor: str = "ui_upload") -> dict[str, Any]:
+    reader = csv.DictReader(io.StringIO(body))
+    mapping: dict[str, str] = {}
+
+    for row in reader:
+        dom = normalize_domain(row.get("domain_name") or "")
+        rank = (row.get("output_rank") or "").strip()
+
+        if not dom or not rank:
+            continue
+
+        try:
+            rank_int = int(rank)
+        except ValueError:
+            continue
+
+        if rank_int < 1:
+            continue
+
+        mapping[dom] = str(rank_int)
+
+    if not mapping:
+        raise RuntimeError("AkaRank CSV contained no usable domains.")
+
+    now = time.time()
+
+    pipe = r.pipeline()
+    pipe.delete(AKARANK_SET)
+    pipe.delete(AKARANK_RANK_HASH)
+    pipe.sadd(AKARANK_SET, *mapping.keys())
+    pipe.hset(AKARANK_RANK_HASH, mapping=mapping)
+    pipe.hset(
+        AKARANK_META_KEY,
+        mapping={
+            "last_fetch_at": str(now),
+            "last_fetch_by": actor,
+            "last_url": "uploaded_csv",
+            "loaded": str(len(mapping)),
+        },
+    )
+    await pipe.execute()
+
+    known_domains = sorted(await r.smembers(KNOWN_DOMAINS_SET))
+    for dom in known_domains:
+        await apply_akarank_to_domain_record(dom)
+        await r.sadd(INDEX_DIRTY_DOMAIN_SET, dom)
+
+    computers = await r.smembers(KNOWN_COMPUTERS_SET)
+    if computers:
+        await r.sadd(INDEX_DIRTY_COMPUTER_SET, *computers)
+
+    return {
+        "loaded": len(mapping),
+        "source": "uploaded_csv",
+    }
 
 async def get_akarank_preview(limit: int = 500) -> dict[str, Any]:
     meta = await r.hgetall(AKARANK_META_KEY)
@@ -3152,6 +3207,40 @@ async def ui_settings_akarank_fetch(request: Request, _auth=Depends(require_logi
         },
     )
 
+@app.post("/ui/settings/akarank/upload")
+async def ui_settings_akarank_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    err = ""
+    saved = ""
+
+    try:
+        body_bytes = await file.read()
+        body = body_bytes.decode("utf-8", errors="replace")
+        result = await import_akarank_csv_text(body, actor=current_username(request))
+        saved = f"akarank_upload:{result.get('loaded', 0)}"
+    except Exception as e:
+        err = str(e)
+
+    s = await load_settings()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": saved,
+            "err": err,
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
 
 @app.get("/ui/settings/akarank/preview", response_class=HTMLResponse)
 async def ui_settings_akarank_preview(request: Request, _auth=Depends(require_login)):

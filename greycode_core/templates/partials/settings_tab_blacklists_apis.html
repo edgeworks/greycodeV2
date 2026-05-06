@@ -118,6 +118,13 @@
     </div>
   {% endif %}
 
+  {% if saved and saved.startswith("akarank_upload:") %}
+    <div class="notice-banner success">
+      <div>AkaRank CSV imported successfully. Loaded {{ saved.split(":")[1] }} domains.</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% endif %}
+  
   <form class="settings-form"
         hx-post="/ui/settings/akarank"
         hx-target="#settingsModalContent"
@@ -185,6 +192,25 @@
 
     <div class="settings-actions">
       <button class="btn primary" type="submit">Save AkaRank</button>
+    </div>
+  </form>
+
+  <form class="settings-form"
+        hx-post="/ui/settings/akarank/upload"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML"
+        enctype="multipart/form-data"
+        style="margin-top:12px;">
+
+    <label>Upload AkaRank CSV
+      <input type="file" name="file" accept=".csv,text/csv">
+      <span class="hint muted">
+        Use this if the public Akamai URL blocks server-side fetching. Expected columns: domain_name, output_rank, date.
+      </span>
+    </label>
+
+    <div class="settings-actions">
+      <button class="btn" type="submit">Upload CSV</button>
     </div>
   </form>
 </section>
