@@ -1019,10 +1019,18 @@ def _fetch_akarank_csv_sync(url: str, timeout: int = 60) -> str:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Greycode/akarank-fetcher",
-            "Accept": "text/csv,*/*",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/csv,text/plain,*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.akamai.com/",
+            "Connection": "close",
         },
     )
+
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
