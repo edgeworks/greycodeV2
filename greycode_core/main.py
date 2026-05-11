@@ -4693,8 +4693,6 @@ async def enrich_network(event: NetworkEvent):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid DestinationIp")
 
-    geoip_data = await geoip_lookup(ip_norm)
-
     manual_filters = await load_manual_filters()
     if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
         return {
@@ -4702,12 +4700,13 @@ async def enrich_network(event: NetworkEvent):
             "filtered": True,
             "filter_kind": "ip",
         }
-    
+
+    geoip_data = await geoip_lookup(ip_norm)
+
     key = f"greycode:ip:{ip_norm}"
     now = datetime.datetime.utcnow().isoformat()
     now_epoch = time.time()
 
-    # Fetch only what we need
     vals = await r.hmget(key, "status", "listing_state", "source", "index_last_sync")
     exists = any(v is not None for v in vals)
 
@@ -4749,6 +4748,7 @@ async def enrich_network(event: NetworkEvent):
             "listing_state": listing_state or "",
             "source": source or "",
             "computer_last": event.Computer,
+            **geoip_data,
         }
 
     pipe = r.pipeline()
@@ -4792,6 +4792,7 @@ async def enrich_network(event: NetworkEvent):
         "listing_state": "PENDING",
         "source": "pending",
         "computer_first": event.Computer,
+        **geoip_data,
     }
 
 
@@ -4864,8 +4865,6 @@ async def enrich_network_bulk(request: Request):
             errors.append({"index": idx, "error": "Invalid DestinationIp"})
             continue
 
-        geoip_data = await geoip_lookup(ip_norm)
-
         if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
             filtered += 1
             continue
@@ -4918,6 +4917,10 @@ async def enrich_network_bulk(request: Request):
     now_epoch = time.time()
     ips = list(aggregated.keys())
 
+    geoip_by_ip: dict[str, dict[str, str]] = {}
+    for ip_norm in ips:
+        geoip_by_ip[ip_norm] = await geoip_lookup(ip_norm)
+
     pipe = r.pipeline()
     for ip_norm in ips:
         key = f"greycode:ip:{ip_norm}"
@@ -4951,6 +4954,7 @@ async def enrich_network_bulk(request: Request):
         count = int(agg["count"])
         computer_first = agg["computer_first"]
         computer_last = agg["computer_last"]
+        geoip_data = geoip_by_ip.get(ip_norm, {})
 
         if meta["exists"]:
             existing_count += count
@@ -5019,6 +5023,7 @@ async def enrich_network_bulk(request: Request):
             "errors": errors[:20],
             "filtered": filtered,
             "computer_observations": len(computer_observations),
+            "geoip_enriched": sum(1 for v in geoip_by_ip.values() if v),
         }
     )
 
