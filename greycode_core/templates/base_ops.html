@@ -374,6 +374,11 @@
       htmx.ajax("GET", url, "#computerTablewrap");
     }
   </script>
+  <script>
+    document.body.addEventListener("htmx:responseError", function (e) {
+      alert("Request failed: HTTP " + e.detail.xhr.status + "\n" + e.detail.xhr.responseText.slice(0, 500));
+    });
+  </script>
   {% endblock %}
 </body>
 </html>
