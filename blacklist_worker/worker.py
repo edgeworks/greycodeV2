@@ -14,6 +14,7 @@ import redis.asyncio as redis
 
 from greycode_core.alerts.router import AlertRouter
 from greycode_core.index_sync import sync_ip_indexes, sync_domain_indexes
+from greycode_core.geoip_engine import geoip_lookup_sync
 
 from greycode_core.blacklist_engine import (
     Vendor,
@@ -315,6 +316,31 @@ async def maybe_fetch_akarank(run_reason: str) -> None:
         return
 
 
+async def enrich_known_ips_geoip(batch: int) -> int:
+    enabled = (await r.hget(CFG_KEY, "geoip_enabled") or "0") == "1"
+    if not enabled:
+        return 0
+
+    updated = 0
+    cursor = 0
+
+    while True:
+        cursor, ips = await r.sscan(KNOWN_IPS_SET, cursor=cursor, count=batch)
+
+        for ip in ips:
+            geoip_data = await asyncio.to_thread(geoip_lookup_sync, ip)
+            if not geoip_data:
+                continue
+
+            await r.hset(f"greycode:ip:{ip}", mapping=geoip_data)
+            await sync_ip_indexes(r, ip)
+            updated += 1
+
+        if cursor == 0:
+            break
+
+    return updated
+
 async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
     cursor = 0
     while True:
@@ -386,6 +412,13 @@ async def update_cycle(run_reason: str) -> None:
         await maybe_fetch_akarank(run_reason=run_reason)
     except Exception as e:
         print(f"[akarank] unexpected error ignored: {e}", flush=True)
+
+    try:
+        geoip_updated = await enrich_known_ips_geoip(batch=batch)
+        if geoip_updated:
+            print(f"[geoip] updated_known_ips={geoip_updated}", flush=True)
+    except Exception as e:
+        print(f"[geoip] update failed: {e}", flush=True)
 
     vendors = await load_vendors(r)
 

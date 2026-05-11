@@ -160,12 +160,16 @@
                           </span>
                         {% elif row.kind == "ip" %}
                           <span class="computer-indicator-text">
-                            <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
-                            <span class="muted">
-                              {% if row.geo_country_iso %}{{ row.geo_country_iso }}{% endif %}
-                              {% if row.geo_asn %}{% if row.geo_country_iso %} • {% endif %}AS{{ row.geo_asn }}{% endif %}
-                              {% if row.geo_as_org %}{% if row.geo_country_iso or row.geo_asn %} • {% endif %}{{ row.geo_as_org }}{% endif %}
-                            </span>
+                            <span class="mono" title="{{ row.indicator }}">{{ row.indicator }}</span>
+
+                            {% if row.geo_as_org or row.geo_country_iso %}
+                              <span class="muted" title="{% if row.geo_asn %}AS{{ row.geo_asn }}{% endif %}{% if row.geo_country_name %} • {{ row.geo_country_name }}{% endif %}">
+                                {% if row.geo_as_org %}{{ row.geo_as_org }}{% endif %}
+                                {% if row.geo_country_iso %}
+                                  {% if row.geo_as_org %} • {% endif %}{{ row.geo_country_iso }}
+                                {% endif %}
+                              </span>
+                            {% endif %}
                           </span>
                         {% else %}
                           <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
