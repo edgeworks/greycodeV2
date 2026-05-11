@@ -10,6 +10,7 @@ from fastapi import Query
 from fastapi import Form
 from pathlib import Path
 import math
+import shutil
 from pydantic import BaseModel, ValidationError
 from starlette.middleware.sessions import SessionMiddleware
 from urllib.parse import quote
@@ -35,6 +36,10 @@ import smtplib
 from email.message import EmailMessage
 from urllib.parse import urlencode
 from config_store import cfg_get_bool, cfg_get, cfg_set
+try:
+    import maxminddb
+except Exception:
+    maxminddb = None
 from blacklist_engine import (
     Vendor, 
     save_vendors, 
@@ -132,6 +137,9 @@ GLOBAL_SCORE_EXCLUDE_META_KEY = "greycode:scoring:exclude:meta"
 AKARANK_SET = "greycode:akarank:top1m"
 AKARANK_RANK_HASH = "greycode:akarank:rank"
 AKARANK_META_KEY = "greycode:akarank:meta"
+GEOIP_DIR = Path(os.getenv("GREYCODE_GEOIP_DIR", "/app/data/geoip"))
+GEOIP_ASN_FILE = GEOIP_DIR / "GeoLite2-ASN.mmdb"
+GEOIP_CITY_FILE = GEOIP_DIR / "GeoLite2-City.mmdb"
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -323,6 +331,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "akarank_enabled": "1",
     "akarank_url": "https://www.akamai.com/pdata/akarank/prod/top1M.csv",
     "akarank_update_interval_min": "1440",
+
+    "geoip_enabled": "0",
 
     "notify_email_enabled": "0",
     "notify_email_to": "",
@@ -1190,6 +1200,77 @@ async def get_akarank_preview(limit: int = 500) -> dict[str, Any]:
         "items": items,
         "truncated": total > len(items),
     }
+
+async def geoip_enabled_setting() -> bool:
+    return await cfg_get_bool(r, "geoip_enabled", default=False)
+
+
+def geoip_available() -> dict[str, Any]:
+    return {
+        "library_available": maxminddb is not None,
+        "asn_db_present": GEOIP_ASN_FILE.exists(),
+        "city_db_present": GEOIP_CITY_FILE.exists(),
+        "asn_path": str(GEOIP_ASN_FILE),
+        "city_path": str(GEOIP_CITY_FILE),
+    }
+
+
+def geoip_lookup_sync(ip_value: str) -> dict[str, str]:
+    """
+    Optional local MaxMind lookup. Safe no-op if library/files are absent.
+    """
+    if maxminddb is None:
+        return {}
+
+    ip_norm = normalize_ip(ip_value)
+    out: dict[str, str] = {}
+
+    if GEOIP_ASN_FILE.exists():
+        try:
+            with maxminddb.open_database(str(GEOIP_ASN_FILE)) as reader:
+                rec = reader.get(ip_norm) or {}
+                asn = rec.get("autonomous_system_number")
+                org = rec.get("autonomous_system_organization")
+                if asn:
+                    out["geo_asn"] = str(asn)
+                if org:
+                    out["geo_as_org"] = str(org)
+        except Exception:
+            pass
+
+    if GEOIP_CITY_FILE.exists():
+        try:
+            with maxminddb.open_database(str(GEOIP_CITY_FILE)) as reader:
+                rec = reader.get(ip_norm) or {}
+
+                country = rec.get("country") or {}
+                city = rec.get("city") or {}
+
+                iso = country.get("iso_code") or ""
+                name = (country.get("names") or {}).get("en") or ""
+                city_name = (city.get("names") or {}).get("en") or ""
+
+                if iso:
+                    out["geo_country_iso"] = str(iso)
+                if name:
+                    out["geo_country_name"] = str(name)
+                if city_name:
+                    out["geo_city"] = str(city_name)
+        except Exception:
+            pass
+
+    if out:
+        out["geo_source"] = "maxmind_geolite2"
+        out["geo_last_checked"] = now_iso()
+
+    return out
+
+
+async def geoip_lookup(ip_value: str) -> dict[str, str]:
+    if not await geoip_enabled_setting():
+        return {}
+
+    return await asyncio.to_thread(geoip_lookup_sync, ip_value)
 
 def normalize_computer(computer: str) -> str:
     return (computer or "").strip().lower().rstrip(".")
@@ -3248,6 +3329,104 @@ async def ui_settings_akarank_preview(request: Request, _auth=Depends(require_lo
     )
 
 
+@app.post("/ui/settings/geoip")
+async def ui_settings_geoip(request: Request, _auth=Depends(require_login)):
+    require_admin(request)
+
+    form = await request.form()
+    enabled = "1" if form.get("geoip_enabled") == "1" else "0"
+
+    await save_settings({"geoip_enabled": enabled})
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="settings",
+        action="update_geoip",
+        target_kind="settings",
+        target="geoip",
+        details={"geoip_enabled": enabled},
+    )
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": "geoip",
+            "geoip_status": geoip_available(),
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+
+@app.post("/ui/settings/geoip/upload")
+async def ui_settings_geoip_upload(
+    request: Request,
+    db_type: str = Form(...),
+    file: UploadFile = File(...),
+    _auth=Depends(require_login),
+):
+    require_admin(request)
+
+    db_type = (db_type or "").strip().lower()
+    if db_type not in {"asn", "city"}:
+        raise HTTPException(status_code=400, detail="db_type must be asn or city")
+
+    target = GEOIP_ASN_FILE if db_type == "asn" else GEOIP_CITY_FILE
+
+    GEOIP_DIR.mkdir(parents=True, exist_ok=True)
+
+    tmp = target.with_suffix(".tmp")
+    with tmp.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Basic sanity check: MMDB files start with binary data and contain metadata;
+    # maxminddb.open_database is the best validation if available.
+    if maxminddb is not None:
+        try:
+            with maxminddb.open_database(str(tmp)) as reader:
+                _ = reader.metadata()
+        except Exception as e:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"Invalid MMDB file: {e}")
+
+    tmp.replace(target)
+
+    await save_settings({"geoip_enabled": "1"})
+
+    await audit_log(
+        r,
+        actor=current_username(request),
+        actor_role=current_role(request),
+        category="settings",
+        action="upload_geoip_db",
+        target_kind="geoip",
+        target=db_type,
+        details={"filename": file.filename or "", "target": str(target)},
+    )
+
+    s = await load_settings()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/settings_modal.html",
+        context={
+            "settings": s,
+            "saved": f"geoip_upload:{db_type}",
+            "geoip_status": geoip_available(),
+            "settings_tab": "blacklist",
+            "settings_partial": settings_partial_for("blacklist"),
+            "is_admin": can_manage_settings(request),
+            **(await get_ui_metrics()),
+        },
+    )
+
+
 @app.get("/", include_in_schema=False)
 async def root(_auth=Depends(require_login)):
     return RedirectResponse(url="/ui", status_code=302)
@@ -4473,6 +4652,8 @@ async def enrich_network(event: NetworkEvent):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid DestinationIp")
 
+    geoip_data = await geoip_lookup(ip_norm)
+
     manual_filters = await load_manual_filters()
     if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
         return {
@@ -4499,6 +4680,7 @@ async def enrich_network(event: NetworkEvent):
             mapping={
                 "last_seen": now,
                 "computer_last": event.Computer,
+                **geoip_data,
             },
         )
 
@@ -4543,6 +4725,7 @@ async def enrich_network(event: NetworkEvent):
             "count_total": "1",
             "uuid": str(uuid.uuid4()),
             "index_last_sync": str(now_epoch),
+            **geoip_data,
         },
     )
     pipe.sadd(STAGED_SET_IP, ip_norm)
@@ -4640,6 +4823,8 @@ async def enrich_network_bulk(request: Request):
             errors.append({"index": idx, "error": "Invalid DestinationIp"})
             continue
 
+        geoip_data = await geoip_lookup(ip_norm)
+
         if value_matches_any_manual_filter(manual_filters, "ip", ip_norm):
             filtered += 1
             continue
@@ -4735,6 +4920,7 @@ async def enrich_network_bulk(request: Request):
                 mapping={
                     "last_seen": now,
                     "computer_last": computer_last,
+                    **geoip_data,
                 },
             )
 
@@ -4760,6 +4946,7 @@ async def enrich_network_bulk(request: Request):
                     "count_total": str(count),
                     "uuid": str(uuid.uuid4()),
                     "index_last_sync": str(now_epoch),
+                    **geoip_data,
                 },
             )
             pipe.sadd(STAGED_SET_IP, ip_norm)

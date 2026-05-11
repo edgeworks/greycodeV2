@@ -6,3 +6,4 @@ jinja2
 python-multipart
 itsdangerous
 cryptography>=42.0.0
+maxminddb

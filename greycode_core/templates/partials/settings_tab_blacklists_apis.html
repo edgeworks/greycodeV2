@@ -218,6 +218,84 @@
 <div class="settings-separator"></div>
 
 <section class="settings-section">
+  <h2>GeoIP</h2>
+  <p class="muted">Optional local MaxMind GeoLite2 enrichment for Sysmon 3 IPs.</p>
+
+  {% if saved == "geoip" or (saved and saved.startswith("geoip_upload:")) %}
+    <div class="notice-banner success">
+      <div>GeoIP settings updated.</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% endif %}
+
+  <form class="settings-form"
+        hx-post="/ui/settings/geoip"
+        hx-target="#settingsModalContent"
+        hx-swap="innerHTML">
+
+    <label class="switch-row">
+      <span>
+        <b>Enable GeoIP enrichment</b>
+        <span class="hint muted">
+          Uses uploaded GeoLite2 ASN and City MMDB files. If files are missing, Greycode continues without GeoIP.
+        </span>
+      </span>
+
+      <label class="switch">
+        <input type="checkbox"
+               name="geoip_enabled"
+               value="1"
+               {% if settings.get('geoip_enabled', '0') == '1' %}checked{% endif %}>
+        <span class="slider"></span>
+      </label>
+    </label>
+
+    <div class="settings-actions">
+      <button class="btn primary" type="submit">Save GeoIP</button>
+    </div>
+  </form>
+
+  <div class="settings-block">
+    <div class="settings-subtitle">Upload databases</div>
+
+    <form class="settings-form"
+          hx-post="/ui/settings/geoip/upload"
+          hx-target="#settingsModalContent"
+          hx-swap="innerHTML"
+          enctype="multipart/form-data">
+
+      <input type="hidden" name="db_type" value="asn">
+      <label>GeoLite2 ASN MMDB
+        <input type="file" name="file" accept=".mmdb">
+      </label>
+
+      <div class="settings-actions">
+        <button class="btn" type="submit">Upload ASN DB</button>
+      </div>
+    </form>
+
+    <form class="settings-form"
+          hx-post="/ui/settings/geoip/upload"
+          hx-target="#settingsModalContent"
+          hx-swap="innerHTML"
+          enctype="multipart/form-data"
+          style="margin-top:12px;">
+
+      <input type="hidden" name="db_type" value="city">
+      <label>GeoLite2 City MMDB
+        <input type="file" name="file" accept=".mmdb">
+      </label>
+
+      <div class="settings-actions">
+        <button class="btn" type="submit">Upload City DB</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<div class="settings-separator"></div>
+
+<section class="settings-section">
   <h2>VirusTotal API</h2>
   <p class="muted">Key, budgets, and runtime enablement</p>
 
