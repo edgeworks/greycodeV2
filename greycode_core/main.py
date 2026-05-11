@@ -1630,6 +1630,13 @@ def build_row_from_data(tab: int, kind: str, indicator_field: str, indicator: st
         "akarank_top1m": (data.get("akarank_top1m") or "0") == "1",
         "akarank_domain": data.get("akarank_domain") or "",
         "akarank_rank": data.get("akarank_rank") or "",
+        "geo_asn": data.get("geo_asn") or "",
+        "geo_as_org": data.get("geo_as_org") or "",
+        "geo_country_iso": data.get("geo_country_iso") or "",
+        "geo_country_name": data.get("geo_country_name") or "",
+        "geo_city": data.get("geo_city") or "",
+        "geo_source": data.get("geo_source") or "",
+        "geo_last_checked": data.get("geo_last_checked") or "",
         "vt_link": f"https://www.virustotal.com/gui/file/{indicator}" if tab == 1 else "",
     }
     return row
