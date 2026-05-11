@@ -20,6 +20,15 @@
       {% endif %}
     {% endif %}
 
+    {% if tab == 3 %}
+      {% if data.get("geo_country_iso") %}
+        <span class="badge">{{ data.get("geo_country_iso") }}</span>
+      {% endif %}
+      {% if data.get("geo_asn") %}
+        <span class="badge">AS{{ data.get("geo_asn") }}</span>
+      {% endif %}
+    {% endif %}
+
     {% if tab == 22 and data.get("akarank_top1m") == "1" %}
       <span class="badge top1m-badge"
             title="{% if data.get('akarank_domain') %}{{ data.get('akarank_domain') }}{% endif %}{% if data.get('akarank_rank') %} rank {{ data.get('akarank_rank') }}{% endif %}">
@@ -98,6 +107,45 @@
           <div class="k">Computer last</div>
           <div class="v wrap">{{ data.get("computer_last","-") }}</div>
         </div>
+
+        {% if tab == 3 %}
+          <div class="fact">
+            <div class="k">Country</div>
+            <div class="v wrap">
+              {% if data.get("geo_country_iso") or data.get("geo_country_name") %}
+                {{ data.get("geo_country_iso","") }}{% if data.get("geo_country_name") %} • {{ data.get("geo_country_name") }}{% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="fact">
+            <div class="k">City</div>
+            <div class="v wrap">{{ data.get("geo_city","") or "-" }}</div>
+          </div>
+
+          <div class="fact">
+            <div class="k">ASN</div>
+            <div class="v mono">{% if data.get("geo_asn") %}AS{{ data.get("geo_asn") }}{% else %}-{% endif %}</div>
+          </div>
+
+          <div class="fact">
+            <div class="k">AS organization</div>
+            <div class="v wrap">{{ data.get("geo_as_org","") or "-" }}</div>
+          </div>
+
+          <div class="fact span2">
+            <div class="k">GeoIP source</div>
+            <div class="v mono wrap">
+              {{ data.get("geo_source","") or "-" }}
+              {% if data.get("geo_last_checked") %}
+                • {{ data.get("geo_last_checked") }}
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+
         <div class="fact span2">
           <div class="k">Ticket</div>
           <div class="v wrap">{{ data.get("ticket_id","") or "-" }}</div>
@@ -117,7 +165,8 @@
         </div>
       {% endif %}
     </div>
-        <div class="settings-separator"></div>
+
+    <div class="settings-separator"></div>
 
     <section class="annotation-block">
       <h2 style="margin-top:0;">Annotations</h2>
@@ -165,94 +214,39 @@
         </form>
       </div>
     </section>
-
   </div>
 
   {% if can_triage %}
   <div class="drawer-footer">
     <div class="drawer-actions">
       {% if tab == 1 %}
-        <button class="btn primary"
-                hx-post="/ui/hash/{{ indicator }}/accept"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Accept
-        </button>
+        <button class="btn primary" hx-post="/ui/hash/{{ indicator }}/accept" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Accept</button>
+        <button class="btn" hx-post="/ui/hash/{{ indicator }}/clear" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Clear</button>
+        <button class="btn" hx-post="/ui/hash/{{ indicator }}/recheck" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Recheck</button>
 
-        <button class="btn"
-                hx-post="/ui/hash/{{ indicator }}/clear"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Clear
-        </button>
-
-        <button class="btn"
-                hx-post="/ui/hash/{{ indicator }}/recheck"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Recheck
-        </button>
-        
         {% if can_delete %}
-        <button class="btn danger"
-                hx-post="/ui/hash/{{ indicator }}/delete"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-confirm="Delete this item?"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Delete
-        </button>
+          <button class="btn danger" hx-post="/ui/hash/{{ indicator }}/delete" hx-target="#drawer" hx-swap="innerHTML" hx-confirm="Delete this item?" hx-on:htmx:afterRequest="gcRefreshTable()">Delete</button>
         {% endif %}
 
-        <form class="escalate"
-              hx-post="/ui/hash/{{ indicator }}/escalate"
-              hx-target="#drawer" hx-swap="innerHTML"
-              hx-on:htmx:afterRequest="gcRefreshTable()">
+        <form class="escalate" hx-post="/ui/hash/{{ indicator }}/escalate" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">
           <input name="ticket_id" placeholder="INC123456" />
           <button class="btn" type="submit">Escalate</button>
         </form>
 
       {% elif tab == 3 %}
-        <button class="btn primary"
-                hx-post="/ui/ip/{{ indicator }}/accept"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Accept
-        </button>
+        <button class="btn primary" hx-post="/ui/ip/{{ indicator }}/accept" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Accept</button>
+        <button class="btn" hx-post="/ui/ip/{{ indicator }}/clear" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Clear</button>
 
-        <button class="btn"
-                hx-post="/ui/ip/{{ indicator }}/clear"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Clear
-        </button>
-
-        <form class="escalate"
-              hx-post="/ui/ip/{{ indicator }}/escalate"
-              hx-target="#drawer" hx-swap="innerHTML"
-              hx-on:htmx:afterRequest="gcRefreshTable()">
+        <form class="escalate" hx-post="/ui/ip/{{ indicator }}/escalate" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">
           <input name="ticket_id" placeholder="INC123456" />
           <button class="btn" type="submit">Escalate</button>
         </form>
 
       {% else %}
-        <button class="btn primary"
-                hx-post="/ui/domain/{{ indicator }}/accept"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Accept
-        </button>
+        <button class="btn primary" hx-post="/ui/domain/{{ indicator }}/accept" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Accept</button>
+        <button class="btn" hx-post="/ui/domain/{{ indicator }}/clear" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">Clear</button>
 
-        <button class="btn"
-                hx-post="/ui/domain/{{ indicator }}/clear"
-                hx-target="#drawer" hx-swap="innerHTML"
-                hx-on:htmx:afterRequest="gcRefreshTable()">
-          Clear
-        </button>
-
-        <form class="escalate"
-              hx-post="/ui/domain/{{ indicator }}/escalate"
-              hx-target="#drawer" hx-swap="innerHTML"
-              hx-on:htmx:afterRequest="gcRefreshTable()">
+        <form class="escalate" hx-post="/ui/domain/{{ indicator }}/escalate" hx-target="#drawer" hx-swap="innerHTML" hx-on:htmx:afterRequest="gcRefreshTable()">
           <input name="ticket_id" placeholder="INC123456" />
           <button class="btn" type="submit">Escalate</button>
         </form>

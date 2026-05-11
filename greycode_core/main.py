@@ -2747,6 +2747,13 @@ async def build_computer_indicator_rows(
                 "pattern": "",
                 "pattern_id": "",
                 "pattern_kind": "",
+                "geo_asn": data.get("geo_asn") or "",
+                "geo_as_org": data.get("geo_as_org") or "",
+                "geo_country_iso": data.get("geo_country_iso") or "",
+                "geo_country_name": data.get("geo_country_name") or "",
+                "geo_city": data.get("geo_city") or "",
+                "geo_source": data.get("geo_source") or "",
+                "geo_last_checked": data.get("geo_last_checked") or "",
             }
 
             # 1. Local computer-scoped exact exclusion

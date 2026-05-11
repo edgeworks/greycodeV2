@@ -158,6 +158,15 @@
                               {{ row.indicator_short }}
                             </span>
                           </span>
+                        {% elif row.kind == "ip" %}
+                          <span class="computer-indicator-text">
+                            <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
+                            <span class="muted">
+                              {% if row.geo_country_iso %}{{ row.geo_country_iso }}{% endif %}
+                              {% if row.geo_asn %}{% if row.geo_country_iso %} • {% endif %}AS{{ row.geo_asn }}{% endif %}
+                              {% if row.geo_as_org %}{% if row.geo_country_iso or row.geo_asn %} • {% endif %}{{ row.geo_as_org }}{% endif %}
+                            </span>
+                          </span>
                         {% else %}
                           <span class="mono" title="{{ row.indicator }}">{{ row.indicator_short }}</span>
                         {% endif %}
@@ -226,6 +235,43 @@
                               {% endif %}
                             </div>
                           </div>
+
+                          {% if row.kind == "ip" %}
+                            <div class="fact">
+                              <div class="k">Country</div>
+                              <div class="v wrap">
+                                {% if row.geo_country_iso or row.geo_country_name %}
+                                  {{ row.geo_country_iso }}{% if row.geo_country_name %} • {{ row.geo_country_name }}{% endif %}
+                                {% else %}
+                                  -
+                                {% endif %}
+                              </div>
+                            </div>
+
+                            <div class="fact">
+                              <div class="k">City</div>
+                              <div class="v wrap">{{ row.geo_city or "-" }}</div>
+                            </div>
+
+                            <div class="fact">
+                              <div class="k">ASN</div>
+                              <div class="v mono">{% if row.geo_asn %}AS{{ row.geo_asn }}{% else %}-{% endif %}</div>
+                            </div>
+
+                            <div class="fact">
+                              <div class="k">AS organization</div>
+                              <div class="v wrap">{{ row.geo_as_org or "-" }}</div>
+                            </div>
+
+                            <div class="fact span2">
+                              <div class="k">GeoIP source</div>
+                              <div class="v mono wrap">
+                                {{ row.geo_source or "-" }}
+                                {% if row.geo_last_checked %} • {{ row.geo_last_checked }}{% endif %}
+                              </div>
+                            </div>
+                          {% endif %}
+
                           <div class="fact">
                             <div class="k">Computer first / last</div>
                             <div class="v wrap">{{ row.computer_first or "-" }} / {{ row.computer_last or "-" }}</div>

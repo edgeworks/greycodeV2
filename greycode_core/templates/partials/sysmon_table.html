@@ -225,7 +225,19 @@
               {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
             </td>
             <td class="col-indicator mono">{{ row.ip }}</td>
-            <td class="col-source mono">{{ row.source or "-" }}</td>
+            <td class="col-source mono">
+              {% if row.geo_as_org or row.geo_country_iso %}
+                {% if row.geo_country_iso %}
+                  <span class="badge">{{ row.geo_country_iso }}</span>
+                {% endif %}
+                {% if row.geo_asn %}
+                  <span class="badge">AS{{ row.geo_asn }}</span>
+                {% endif %}
+                <span title="{{ row.geo_as_org }}">{{ row.geo_as_org or row.source or "-" }}</span>
+              {% else %}
+                {{ row.source or "-" }}
+              {% endif %}
+            </td>
           {% else %}
             <td class="col-computer" title="{{ row.computer_first }} / {{ row.computer_last }}">
               {{ row.computer_first or "-" }}{% if row.computer_last and row.computer_last != row.computer_first %} → {{ row.computer_last }}{% endif %}
