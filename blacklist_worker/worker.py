@@ -7,6 +7,8 @@ import time
 import csv
 import io
 import urllib.request
+import urllib.error
+import redis.exceptions
 from typing import List, Tuple
 import redis.asyncio as redis
 
@@ -61,7 +63,24 @@ def _iso_to_epoch(ts: str | None) -> float:
 
 
 
+async def wait_for_redis(max_wait_sec: int = 300) -> None:
+    start = time.time()
 
+    while True:
+        try:
+            pong = await r.ping()
+            if pong:
+                return
+        except redis.exceptions.BusyLoadingError:
+            pass
+        except Exception as e:
+            print(f"[worker] redis not ready: {e}", flush=True)
+
+        if time.time() - start >= max_wait_sec:
+            raise RuntimeError(f"Redis did not become ready within {max_wait_sec}s")
+
+        print("[worker] waiting for Redis to finish loading...", flush=True)
+        await asyncio.sleep(3)
 
 async def _get_interval_min() -> int:
     v = await r.hget(CFG_KEY, "blacklist_update_interval_min")
@@ -191,7 +210,6 @@ async def maybe_fetch_akarank(run_reason: str) -> None:
     interval_min = await _get_akarank_interval_min()
     meta = await r.hgetall(AKARANK_META_KEY)
 
-    last_fetch = 0.0
     try:
         last_fetch = float(meta.get("last_fetch_at") or 0.0)
     except Exception:
@@ -210,53 +228,91 @@ async def maybe_fetch_akarank(run_reason: str) -> None:
 
     print(f"[akarank] fetching url={url} reason={run_reason}", flush=True)
 
-    body = await asyncio.to_thread(_fetch_akarank_csv_sync, url)
+    try:
+        body = await asyncio.to_thread(_fetch_akarank_csv_sync, url)
+    except urllib.error.HTTPError as e:
+        await r.hset(
+            AKARANK_META_KEY,
+            mapping={
+                "last_error_at": str(time.time()),
+                "last_error": f"HTTP {e.code}: {e.reason}",
+                "last_url": url,
+            },
+        )
+        print(f"[akarank] fetch failed HTTP {e.code}: {e.reason}", flush=True)
+        return
+    except Exception as e:
+        await r.hset(
+            AKARANK_META_KEY,
+            mapping={
+                "last_error_at": str(time.time()),
+                "last_error": str(e),
+                "last_url": url,
+            },
+        )
+        print(f"[akarank] fetch failed: {e}", flush=True)
+        return
 
-    reader = csv.DictReader(io.StringIO(body))
-    mapping: dict[str, str] = {}
+    try:
+        reader = csv.DictReader(io.StringIO(body))
+        mapping: dict[str, str] = {}
 
-    for row in reader:
-        dom = normalize_domain(row.get("domain_name") or "")
-        rank = (row.get("output_rank") or "").strip()
+        for row in reader:
+            dom = normalize_domain(row.get("domain_name") or "")
+            rank = (row.get("output_rank") or "").strip()
 
-        if not dom or not rank:
-            continue
+            if not dom or not rank:
+                continue
 
-        try:
-            rank_int = int(rank)
-        except ValueError:
-            continue
+            try:
+                rank_int = int(rank)
+            except ValueError:
+                continue
 
-        if rank_int < 1:
-            continue
+            if rank_int < 1:
+                continue
 
-        mapping[dom] = str(rank_int)
+            mapping[dom] = str(rank_int)
 
-    if not mapping:
-        raise RuntimeError("AkaRank fetch returned no usable domains.")
+        if not mapping:
+            raise RuntimeError("AkaRank fetch returned no usable domains.")
 
-    pipe = r.pipeline()
-    pipe.delete(AKARANK_SET)
-    pipe.delete(AKARANK_RANK_HASH)
-    pipe.sadd(AKARANK_SET, *mapping.keys())
-    pipe.hset(AKARANK_RANK_HASH, mapping=mapping)
-    pipe.hset(
-        AKARANK_META_KEY,
-        mapping={
-            "last_fetch_at": str(now),
-            "last_fetch_by": "blacklist_worker",
-            "last_url": url,
-            "loaded": str(len(mapping)),
-        },
-    )
-    await pipe.execute()
+        pipe = r.pipeline()
+        pipe.delete(AKARANK_SET)
+        pipe.delete(AKARANK_RANK_HASH)
+        pipe.sadd(AKARANK_SET, *mapping.keys())
+        pipe.hset(AKARANK_RANK_HASH, mapping=mapping)
+        pipe.hset(
+            AKARANK_META_KEY,
+            mapping={
+                "last_fetch_at": str(now),
+                "last_fetch_by": "blacklist_worker",
+                "last_url": url,
+                "loaded": str(len(mapping)),
+                "last_error": "",
+                "last_error_at": "",
+            },
+        )
+        await pipe.execute()
 
-    updated_domains = await apply_akarank_to_known_domains()
+        updated_domains = await apply_akarank_to_known_domains()
 
-    print(
-        f"[akarank] loaded={len(mapping)} updated_known_domains={updated_domains}",
-        flush=True,
-    )
+        print(
+            f"[akarank] loaded={len(mapping)} updated_known_domains={updated_domains}",
+            flush=True,
+        )
+
+    except Exception as e:
+        await r.hset(
+            AKARANK_META_KEY,
+            mapping={
+                "last_error_at": str(time.time()),
+                "last_error": str(e),
+                "last_url": url,
+            },
+        )
+        print(f"[akarank] processing failed: {e}", flush=True)
+        return
 
 
 async def recheck_all_indicators(vendors: List[Vendor], batch: int) -> None:
@@ -326,31 +382,67 @@ async def update_cycle(run_reason: str) -> None:
     interval_min = await _get_interval_min()
     batch = await _get_recheck_batch()
 
-    await maybe_fetch_akarank(run_reason=run_reason)
+    try:
+        await maybe_fetch_akarank(run_reason=run_reason)
+    except Exception as e:
+        print(f"[akarank] unexpected error ignored: {e}", flush=True)
 
     vendors = await load_vendors(r)
 
     changed_any = False
     new_vendors: List[Vendor] = []
+
     for v in vendors:
-        changed, v2 = await fetch_vendor(r, v, interval_min=interval_min)
-        changed_any = changed_any or changed
-        new_vendors.append(v2)
+        try:
+            changed, v2 = await fetch_vendor(r, v, interval_min=interval_min)
+            changed_any = changed_any or changed
+            new_vendors.append(v2)
+        except Exception as e:
+            print(f"[blacklist] vendor fetch failed key={getattr(v, 'key', '?')}: {e}", flush=True)
+            new_vendors.append(v)
 
     await save_vendors(r, new_vendors)
     vendors = new_vendors
 
-    await recheck_all_indicators(vendors, batch=batch)
+    try:
+        await recheck_all_indicators(vendors, batch=batch)
+    except Exception as e:
+        print(f"[blacklist] recheck failed: {e}", flush=True)
 
 
 async def worker_loop() -> None:
-    # Run once at startup
-    await update_cycle(run_reason="startup")
+    await wait_for_redis()
 
     while True:
-        interval_min = await _get_interval_min()
+        try:
+            await update_cycle(run_reason="startup")
+            break
+        except redis.exceptions.BusyLoadingError:
+            print("[worker] Redis still loading during startup cycle...", flush=True)
+            await asyncio.sleep(3)
+        except Exception as e:
+            print(f"[worker] startup cycle failed, continuing: {e}", flush=True)
+            break
+
+    while True:
+        try:
+            interval_min = await _get_interval_min()
+        except redis.exceptions.BusyLoadingError:
+            print("[worker] Redis busy/loading before sleep interval lookup...", flush=True)
+            await asyncio.sleep(3)
+            continue
+        except Exception as e:
+            print(f"[worker] failed to read interval, using 60 min: {e}", flush=True)
+            interval_min = 60
+
         await asyncio.sleep(interval_min * 60)
-        await update_cycle(run_reason="interval")
+
+        try:
+            await update_cycle(run_reason="interval")
+        except redis.exceptions.BusyLoadingError:
+            print("[worker] Redis busy/loading during interval cycle...", flush=True)
+        except Exception as e:
+            print(f"[worker] interval cycle failed, continuing: {e}", flush=True)
 
 
 async def main() -> None:
