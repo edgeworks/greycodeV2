@@ -11,6 +11,7 @@ import urllib.error
 import redis.exceptions
 from typing import List, Tuple
 import redis.asyncio as redis
+from redis.exceptions import BusyLoadingError
 
 from greycode_core.alerts.router import AlertRouter
 from greycode_core.index_sync import sync_ip_indexes, sync_domain_indexes
@@ -72,7 +73,7 @@ async def wait_for_redis(max_wait_sec: int = 300) -> None:
             pong = await r.ping()
             if pong:
                 return
-        except redis.exceptions.BusyLoadingError:
+        except BusyLoadingError:
             pass
         except Exception as e:
             print(f"[worker] redis not ready: {e}", flush=True)
@@ -450,7 +451,7 @@ async def worker_loop() -> None:
         try:
             await update_cycle(run_reason="startup")
             break
-        except redis.exceptions.BusyLoadingError:
+        except BusyLoadingError:
             print("[worker] Redis still loading during startup cycle...", flush=True)
             await asyncio.sleep(3)
         except Exception as e:
@@ -460,7 +461,7 @@ async def worker_loop() -> None:
     while True:
         try:
             interval_min = await _get_interval_min()
-        except redis.exceptions.BusyLoadingError:
+        except BusyLoadingError:
             print("[worker] Redis busy/loading before sleep interval lookup...", flush=True)
             await asyncio.sleep(3)
             continue
@@ -472,7 +473,7 @@ async def worker_loop() -> None:
 
         try:
             await update_cycle(run_reason="interval")
-        except redis.exceptions.BusyLoadingError:
+        except BusyLoadingError:
             print("[worker] Redis busy/loading during interval cycle...", flush=True)
         except Exception as e:
             print(f"[worker] interval cycle failed, continuing: {e}", flush=True)
