@@ -1205,13 +1205,37 @@ async def geoip_enabled_setting() -> bool:
     return await cfg_get_bool(r, "geoip_enabled", default=False)
 
 
-def geoip_available() -> dict[str, Any]:
+def geoip_file_status(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "present": False,
+            "path": str(path),
+            "size": 0,
+            "mtime": "",
+        }
+
+    st = path.stat()
+    return {
+        "present": True,
+        "path": str(path),
+        "size": st.st_size,
+        "mtime": datetime.datetime.utcfromtimestamp(st.st_mtime).isoformat(),
+    }
+
+
+async def geoip_available() -> dict[str, Any]:
+    meta = await r.hgetall("greycode:geoip:meta")
+
     return {
         "library_available": maxminddb is not None,
-        "asn_db_present": GEOIP_ASN_FILE.exists(),
-        "city_db_present": GEOIP_CITY_FILE.exists(),
-        "asn_path": str(GEOIP_ASN_FILE),
-        "city_path": str(GEOIP_CITY_FILE),
+        "asn": geoip_file_status(GEOIP_ASN_FILE),
+        "city": geoip_file_status(GEOIP_CITY_FILE),
+        "last_asn_upload_at": meta.get("last_asn_upload_at") or "",
+        "last_asn_upload_by": meta.get("last_asn_upload_by") or "",
+        "last_asn_filename": meta.get("last_asn_filename") or "",
+        "last_city_upload_at": meta.get("last_city_upload_at") or "",
+        "last_city_upload_by": meta.get("last_city_upload_by") or "",
+        "last_city_filename": meta.get("last_city_filename") or "",
     }
 
 
@@ -3246,6 +3270,7 @@ async def ui_settings_akarank(request: Request, _auth=Depends(require_login)):
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
+            "akarank_status": await r.hgetall(AKARANK_META_KEY),
             **(await get_ui_metrics()),
         },
     )
@@ -3277,6 +3302,7 @@ async def ui_settings_akarank_fetch(request: Request, _auth=Depends(require_logi
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
+            "akarank_status": await r.hgetall(AKARANK_META_KEY),
             **(await get_ui_metrics()),
         },
     )
@@ -3312,6 +3338,7 @@ async def ui_settings_akarank_upload(
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
+            "akarank_status": await r.hgetall(AKARANK_META_KEY),
             **(await get_ui_metrics()),
         },
     )
@@ -3356,7 +3383,7 @@ async def ui_settings_geoip(request: Request, _auth=Depends(require_login)):
         context={
             "settings": s,
             "saved": "geoip",
-            "geoip_status": geoip_available(),
+            "geoip_status": await geoip_available(),
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
@@ -3398,6 +3425,18 @@ async def ui_settings_geoip_upload(
 
     tmp.replace(target)
 
+    meta_field_prefix = "last_asn" if db_type == "asn" else "last_city"
+
+    await r.hset(
+        "greycode:geoip:meta",
+        mapping={
+            f"{meta_field_prefix}_upload_at": now_iso(),
+            f"{meta_field_prefix}_upload_by": current_username(request),
+            f"{meta_field_prefix}_filename": file.filename or "",
+            f"{meta_field_prefix}_path": str(target),
+        },
+    )
+
     await save_settings({"geoip_enabled": "1"})
 
     await audit_log(
@@ -3418,7 +3457,7 @@ async def ui_settings_geoip_upload(
         context={
             "settings": s,
             "saved": f"geoip_upload:{db_type}",
-            "geoip_status": geoip_available(),
+            "geoip_status": await geoip_available(),
             "settings_tab": "blacklist",
             "settings_partial": settings_partial_for("blacklist"),
             "is_admin": can_manage_settings(request),
@@ -4256,6 +4295,8 @@ async def ui_settings_modal(
             "users": users,
             "audit_rows": audit_rows,
             "is_admin": can_manage_settings(request),
+            "akarank_status": await r.hgetall(AKARANK_META_KEY),
+            "geoip_status": await geoip_available(),
             **(await get_ui_metrics()),
         },
     )

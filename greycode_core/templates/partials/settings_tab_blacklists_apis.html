@@ -125,6 +125,39 @@
     </div>
   {% endif %}
   
+  <div class="settings-block">
+    <div class="settings-subtitle">Loaded data</div>
+
+    <div class="manual-filter-item">
+      <div class="manual-filter-item-main">
+        <div class="manual-filter-item-top">
+          <span class="badge">AkaRank</span>
+          {% if akarank_status and akarank_status.loaded %}
+            <span class="badge match-known">Loaded</span>
+            <span class="badge">{{ akarank_status.loaded }} domains</span>
+          {% else %}
+            <span class="badge">Missing</span>
+          {% endif %}
+        </div>
+
+        <div class="muted">
+          {% if akarank_status and akarank_status.last_fetch_at %}
+            Last import epoch {{ akarank_status.last_fetch_at }}
+            {% if akarank_status.last_fetch_by %} by {{ akarank_status.last_fetch_by }}{% endif %}
+            {% if akarank_status.last_url %} • source: {{ akarank_status.last_url }}{% endif %}
+          {% else %}
+            No AkaRank data imported yet.
+          {% endif %}
+
+          {% if akarank_status and akarank_status.last_error %}
+            <br>
+            <span class="login-error">Last fetch error: {{ akarank_status.last_error }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
   <form class="settings-form"
         hx-post="/ui/settings/akarank"
         hx-target="#settingsModalContent"
@@ -221,9 +254,14 @@
   <h2>GeoIP</h2>
   <p class="muted">Optional local MaxMind GeoLite2 enrichment for Sysmon 3 IPs.</p>
 
-  {% if saved == "geoip" or (saved and saved.startswith("geoip_upload:")) %}
+  {% if saved == "geoip" %}
     <div class="notice-banner success">
-      <div>GeoIP settings updated.</div>
+      <div>GeoIP settings saved.</div>
+      <div class="close" onclick="this.parentElement.remove()">✕</div>
+    </div>
+  {% elif saved and saved.startswith("geoip_upload:") %}
+    <div class="notice-banner success">
+      <div>GeoIP {{ saved.split(":")[1]|upper }} database uploaded successfully.</div>
       <div class="close" onclick="this.parentElement.remove()">✕</div>
     </div>
   {% endif %}
@@ -256,6 +294,64 @@
   </form>
 
   <div class="settings-block">
+    <div class="settings-subtitle">Loaded databases</div>
+
+    {% if geoip_status and not geoip_status.library_available %}
+      <div class="notice-banner warn">
+        <div>Python package maxminddb is not installed. Uploads can be stored, but lookups will not run.</div>
+      </div>
+    {% endif %}
+
+    <div class="manual-filter-list">
+      <div class="manual-filter-item">
+        <div class="manual-filter-item-main">
+          <div class="manual-filter-item-top">
+            <span class="badge">ASN</span>
+            {% if geoip_status and geoip_status.asn.present %}
+              <span class="badge match-known">Loaded</span>
+            {% else %}
+              <span class="badge">Missing</span>
+            {% endif %}
+          </div>
+          <div class="muted">
+            {% if geoip_status and geoip_status.last_asn_upload_at %}
+              Last upload {{ geoip_status.last_asn_upload_at }} by {{ geoip_status.last_asn_upload_by or "-" }}
+              {% if geoip_status.last_asn_filename %} • {{ geoip_status.last_asn_filename }}{% endif %}
+            {% elif geoip_status and geoip_status.asn.present %}
+              File present at {{ geoip_status.asn.path }} • modified {{ geoip_status.asn.mtime }}
+            {% else %}
+              No ASN database uploaded yet.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="manual-filter-item">
+        <div class="manual-filter-item-main">
+          <div class="manual-filter-item-top">
+            <span class="badge">City</span>
+            {% if geoip_status and geoip_status.city.present %}
+              <span class="badge match-known">Loaded</span>
+            {% else %}
+              <span class="badge">Missing</span>
+            {% endif %}
+          </div>
+          <div class="muted">
+            {% if geoip_status and geoip_status.last_city_upload_at %}
+              Last upload {{ geoip_status.last_city_upload_at }} by {{ geoip_status.last_city_upload_by or "-" }}
+              {% if geoip_status.last_city_filename %} • {{ geoip_status.last_city_filename }}{% endif %}
+            {% elif geoip_status and geoip_status.city.present %}
+              File present at {{ geoip_status.city.path }} • modified {{ geoip_status.city.mtime }}
+            {% else %}
+              No City database uploaded yet.
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="settings-block">
     <div class="settings-subtitle">Upload databases</div>
 
     <form class="settings-form"
@@ -265,8 +361,10 @@
           enctype="multipart/form-data">
 
       <input type="hidden" name="db_type" value="asn">
+
       <label>GeoLite2 ASN MMDB
-        <input type="file" name="file" accept=".mmdb">
+        <input type="file" name="file" accept=".mmdb" required>
+        <span class="hint muted">Provides ASN and AS organization.</span>
       </label>
 
       <div class="settings-actions">
@@ -282,8 +380,10 @@
           style="margin-top:12px;">
 
       <input type="hidden" name="db_type" value="city">
+
       <label>GeoLite2 City MMDB
-        <input type="file" name="file" accept=".mmdb">
+        <input type="file" name="file" accept=".mmdb" required>
+        <span class="hint muted">Provides country and city information.</span>
       </label>
 
       <div class="settings-actions">
