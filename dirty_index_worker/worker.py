@@ -4,6 +4,7 @@ import os
 import signal
 
 import redis.asyncio as redis
+from redis.exceptions import BusyLoadingError, ConnectionError, TimeoutError
 
 from greycode_core.index_sync import (
     sync_sha256_indexes,
@@ -29,7 +30,7 @@ INDEX_DIRTY_COMPUTER_SET = "greycode:index_dirty:computer"
 BATCH_SIZE = int(os.getenv("DIRTY_INDEX_BATCH_SIZE", "200"))
 IDLE_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_IDLE_SLEEP_SEC", "2"))
 BUSY_SLEEP_SEC = float(os.getenv("DIRTY_INDEX_BUSY_SLEEP_SEC", "0.2"))
-RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))  # fallback only
+RARE_COMPUTER_THRESHOLD = int(os.getenv("GREYCODE_RARE_COMPUTER_THRESHOLD", "10"))
 
 stop_event = asyncio.Event()
 
@@ -39,11 +40,40 @@ def _handle_signal(signum, frame):
     stop_event.set()
 
 
+async def wait_for_redis(r: redis.Redis, max_wait_sec: int = 300) -> None:
+    start = asyncio.get_running_loop().time()
+
+    while not stop_event.is_set():
+        try:
+            if await r.ping():
+                return
+        except BusyLoadingError:
+            logger.warning("Redis is loading dataset; waiting...")
+        except (ConnectionError, TimeoutError) as e:
+            logger.warning("Redis not ready: %s", e)
+        except Exception:
+            logger.exception("Unexpected Redis readiness error")
+
+        if asyncio.get_running_loop().time() - start >= max_wait_sec:
+            raise RuntimeError(f"Redis did not become ready within {max_wait_sec}s")
+
+        await asyncio.sleep(3)
+
+
 async def drain_dirty_set(r: redis.Redis, set_key: str, kind: str, batch_size: int) -> int:
-    pipe = r.pipeline()
-    for _ in range(batch_size):
-        pipe.spop(set_key)
-    raw = await pipe.execute()
+    try:
+        pipe = r.pipeline()
+        for _ in range(batch_size):
+            pipe.spop(set_key)
+        raw = await pipe.execute()
+    except BusyLoadingError:
+        logger.warning("Redis busy/loading while draining kind=%s", kind)
+        await asyncio.sleep(3)
+        return 0
+    except (ConnectionError, TimeoutError) as e:
+        logger.warning("Redis connection issue while draining kind=%s: %s", kind, e)
+        await asyncio.sleep(3)
+        return 0
 
     indicators = [x for x in raw if x]
     if not indicators:
@@ -71,9 +101,28 @@ async def drain_dirty_set(r: redis.Redis, set_key: str, kind: str, batch_size: i
 
             processed += 1
 
+        except BusyLoadingError:
+            logger.warning("Redis busy/loading during sync kind=%s indicator=%s", kind, indicator)
+            try:
+                await r.sadd(set_key, indicator)
+            except Exception:
+                logger.exception("failed to requeue after BusyLoading kind=%s indicator=%s", kind, indicator)
+            await asyncio.sleep(3)
+
+        except (ConnectionError, TimeoutError) as e:
+            logger.warning("Redis connection issue during sync kind=%s indicator=%s: %s", kind, indicator, e)
+            try:
+                await r.sadd(set_key, indicator)
+            except Exception:
+                logger.exception("failed to requeue after connection issue kind=%s indicator=%s", kind, indicator)
+            await asyncio.sleep(3)
+
         except Exception:
             logger.exception("sync failed kind=%s indicator=%s", kind, indicator)
-            await r.sadd(set_key, indicator)
+            try:
+                await r.sadd(set_key, indicator)
+            except Exception:
+                logger.exception("failed to requeue failed sync kind=%s indicator=%s", kind, indicator)
 
     return processed
 
@@ -92,11 +141,22 @@ async def main():
     )
 
     try:
+        await wait_for_redis(r)
+
         while not stop_event.is_set():
-            ip_done = await drain_dirty_set(r, INDEX_DIRTY_IP_SET, "ip", BATCH_SIZE)
-            domain_done = await drain_dirty_set(r, INDEX_DIRTY_DOMAIN_SET, "domain", BATCH_SIZE)
-            sha_done = await drain_dirty_set(r, INDEX_DIRTY_SHA256_SET, "sha256", BATCH_SIZE)
-            computer_done = await drain_dirty_set(r, INDEX_DIRTY_COMPUTER_SET, "computer", BATCH_SIZE)
+            try:
+                ip_done = await drain_dirty_set(r, INDEX_DIRTY_IP_SET, "ip", BATCH_SIZE)
+                domain_done = await drain_dirty_set(r, INDEX_DIRTY_DOMAIN_SET, "domain", BATCH_SIZE)
+                sha_done = await drain_dirty_set(r, INDEX_DIRTY_SHA256_SET, "sha256", BATCH_SIZE)
+                computer_done = await drain_dirty_set(r, INDEX_DIRTY_COMPUTER_SET, "computer", BATCH_SIZE)
+            except BusyLoadingError:
+                logger.warning("Redis busy/loading during worker loop")
+                await asyncio.sleep(3)
+                continue
+            except (ConnectionError, TimeoutError) as e:
+                logger.warning("Redis connection issue during worker loop: %s", e)
+                await asyncio.sleep(3)
+                continue
 
             total = ip_done + domain_done + sha_done + computer_done
 
@@ -112,6 +172,7 @@ async def main():
                 await asyncio.sleep(BUSY_SLEEP_SEC)
             else:
                 await asyncio.sleep(IDLE_SLEEP_SEC)
+
     finally:
         await r.aclose()
         logger.warning("dirty-index-worker stopped")

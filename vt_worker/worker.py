@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 import httpx
 import redis.asyncio as redis
+from redis.exceptions import BusyLoadingError, ConnectionError, TimeoutError
 
 from greycode_core.alerts import AlertRouter, AlertEvent
 from greycode_core.indexes import update_sha256_indexes
@@ -33,6 +34,23 @@ DEFAULT_RETRY_SECONDS_429 = 120         # conservative backoff
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 alert_router = AlertRouter()
 
+async def wait_for_redis(max_wait_sec: int = 300) -> None:
+    start = time.time()
+
+    while True:
+        try:
+            if await r.ping():
+                return
+        except BusyLoadingError:
+            pass
+        except (ConnectionError, TimeoutError) as e:
+            print(f"[vt-worker] redis not ready: {e}", flush=True)
+
+        if time.time() - start >= max_wait_sec:
+            raise RuntimeError(f"Redis did not become ready within {max_wait_sec}s")
+
+        print("[vt-worker] waiting for Redis to finish loading...", flush=True)
+        await asyncio.sleep(3)
 
 def _fernet() -> Fernet:
     secret = os.getenv("GREYCODE_SESSION_SECRET", "")
@@ -286,8 +304,19 @@ async def query_virustotal(sha256: str, *, api_key: str, retry_429: int) -> None
 
 
 async def worker_loop() -> None:
+    await wait_for_redis()
     while True:
-        item = await r.brpop(VT_QUEUE, timeout=5)
+        try:
+            item = await r.brpop(VT_QUEUE, timeout=5)
+        except BusyLoadingError:
+            print("[vt-worker] Redis busy/loading during queue pop...", flush=True)
+            await asyncio.sleep(3)
+            continue
+        except (ConnectionError, TimeoutError) as e:
+            print(f"[vt-worker] Redis connection issue during queue pop: {e}", flush=True)
+            await asyncio.sleep(3)
+            continue
+        
         if not item:
             continue
 
