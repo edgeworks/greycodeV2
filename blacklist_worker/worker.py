@@ -15,7 +15,7 @@ from redis.exceptions import BusyLoadingError
 
 from greycode_core.alerts.router import AlertRouter
 from greycode_core.index_sync import sync_ip_indexes, sync_domain_indexes
-from greycode_core.geoip_engine import geoip_lookup_sync
+from greycode_core.geoip_engine import geoip_lookup_sync, geoip_available
 
 from greycode_core.blacklist_engine import (
     Vendor,
@@ -320,17 +320,26 @@ async def maybe_fetch_akarank(run_reason: str) -> None:
 async def enrich_known_ips_geoip(batch: int) -> int:
     enabled = (await r.hget(CFG_KEY, "geoip_enabled") or "0") == "1"
     if not enabled:
+        print("[geoip] disabled", flush=True)
         return 0
 
+    status = geoip_available()
+    print(f"[geoip] status={status}", flush=True)
+
     updated = 0
+    missed = 0
+    scanned = 0
     cursor = 0
 
     while True:
         cursor, ips = await r.sscan(KNOWN_IPS_SET, cursor=cursor, count=batch)
 
         for ip in ips:
+            scanned += 1
             geoip_data = await asyncio.to_thread(geoip_lookup_sync, ip)
+
             if not geoip_data:
+                missed += 1
                 continue
 
             await r.hset(f"greycode:ip:{ip}", mapping=geoip_data)
@@ -339,6 +348,11 @@ async def enrich_known_ips_geoip(batch: int) -> int:
 
         if cursor == 0:
             break
+
+    print(
+        f"[geoip] scanned={scanned} updated={updated} missed={missed}",
+        flush=True,
+    )
 
     return updated
 

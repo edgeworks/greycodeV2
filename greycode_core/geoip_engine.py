@@ -13,7 +13,7 @@ except Exception:
     maxminddb = None
 
 
-GEOIP_DIR = os.getenv("GEOIP_DIR", "/data/geoip")
+GEOIP_DIR = os.getenv("GREYCODE_GEOIP_DIR", "/app/data/geoip")
 
 ASN_DB_PATH = os.path.join(GEOIP_DIR, "GeoLite2-ASN.mmdb")
 CITY_DB_PATH = os.path.join(GEOIP_DIR, "GeoLite2-City.mmdb")
