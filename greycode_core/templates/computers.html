@@ -45,8 +45,7 @@
       <button class="btn primary" type="submit">Apply</button>
     </div>
 
-    <a class="btn"
-      href="/ui/computers/export.csv?q={{ q }}&sort={{ sort }}&order={{ order }}">
+    <a class="btn" id="computerExportCsvBtn" href="#">
       Export CSV
     </a>
   </form>
@@ -77,6 +76,25 @@
         const newUrl = "/ui/computers?" + params.toString();
         e.detail.headers["HX-Push-Url"] = newUrl;
       }
+    });
+  </script>
+  <script>
+    function gcBuildComputerExportUrl() {
+      const form = document.getElementById("computerFilters");
+      if (!form) return "/ui/computers/export.csv";
+
+      const params = new URLSearchParams(new FormData(form));
+      params.delete("page");
+
+      return "/ui/computers/export.csv?" + params.toString();
+    }
+
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest("#computerExportCsvBtn");
+      if (!btn) return;
+
+      e.preventDefault();
+      window.location.href = gcBuildComputerExportUrl();
     });
   </script>
 {% endblock %}

@@ -154,30 +154,30 @@
     })();
   </script>
   <script>
-  document.body.addEventListener("htmx:configRequest", function (e) {
-    if (e.target && e.target.id === "filters") {
-      const params = new URLSearchParams(e.detail.parameters);
-      const newUrl = "/ui/sysmon/{{ tab }}?" + params.toString();
-      e.detail.headers["HX-Push-Url"] = newUrl;
+    document.body.addEventListener("htmx:configRequest", function (e) {
+      if (e.target && e.target.id === "filters") {
+        const params = new URLSearchParams(e.detail.parameters);
+        const newUrl = "/ui/sysmon/{{ tab }}?" + params.toString();
+        e.detail.headers["HX-Push-Url"] = newUrl;
+      }
+    });
+  </script>
+  <script>
+    function gcBuildSysmonExportUrl() {
+      const form = document.getElementById("filters");
+      if (!form) return "/ui/sysmon/{{ tab }}/export.csv";
+
+      const params = new URLSearchParams(new FormData(form));
+      params.delete("page");
+      return "/ui/sysmon/{{ tab }}/export.csv?" + params.toString();
     }
-  });
-</script>
-<script>
-  function gcBuildSysmonExportUrl() {
-    const form = document.getElementById("filters");
-    if (!form) return "/ui/sysmon/{{ tab }}/export.csv";
 
-    const params = new URLSearchParams(new FormData(form));
-    params.delete("page");
-    return "/ui/sysmon/{{ tab }}/export.csv?" + params.toString();
-  }
+    document.addEventListener("click", function (e) {
+      const btn = e.target.closest("#exportCsvBtn");
+      if (!btn) return;
 
-  document.addEventListener("click", function (e) {
-    const btn = e.target.closest("#exportCsvBtn");
-    if (!btn) return;
-
-    e.preventDefault();
-    window.location.href = gcBuildSysmonExportUrl();
-  });
-</script>
+      e.preventDefault();
+      window.location.href = gcBuildSysmonExportUrl();
+    });
+  </script>
 {% endblock %}
