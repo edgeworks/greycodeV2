@@ -3,7 +3,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi import Path as ApiPath
 from fastapi import Depends
 from fastapi import Request, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi import Query
@@ -140,6 +140,7 @@ AKARANK_META_KEY = "greycode:akarank:meta"
 GEOIP_DIR = Path(os.getenv("GREYCODE_GEOIP_DIR", "/app/data/geoip"))
 GEOIP_ASN_FILE = GEOIP_DIR / "GeoLite2-ASN.mmdb"
 GEOIP_CITY_FILE = GEOIP_DIR / "GeoLite2-City.mmdb"
+EXPORT_MAX_ROWS = 50000
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -1554,6 +1555,28 @@ async def matching_global_score_patterns(
                 matches.append(rule)
 
     return matches
+
+def csv_response(filename: str, fieldnames: list[str], rows: list[dict[str, Any]]) -> StreamingResponse:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    buf.seek(0)
+
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )
+
+def safe_export_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ",".join(str(x) for x in value)
+    return str(value)
 
 def fmt_epoch(ts: Optional[str]) -> str:
     if not ts:
@@ -6034,7 +6057,6 @@ async def ui_computers(
         },
     )
 
-
 @app.get("/ui/computers/table", response_class=HTMLResponse)
 async def ui_computers_table(
     request: Request,
@@ -6077,6 +6099,59 @@ async def ui_computers_table(
             "page": page,
             "page_size": page_size,
         },
+    )
+
+@app.get("/ui/computers/export.csv")
+async def ui_computers_export_csv(
+    request: Request,
+    q: str = Query(""),
+    sort: str = Query("noticeable_score"),
+    order: str = Query("desc"),
+    _auth=Depends(require_login),
+):
+    rows, total = await fetch_computer_page(
+        q=q,
+        sort=sort,
+        order=order,
+        page=1,
+        page_size=EXPORT_MAX_ROWS,
+    )
+
+    fieldnames = [
+        "computer",
+        "noticeable_score",
+        "rare_unknown_hash_count",
+        "rare_total",
+        "rare_sha256",
+        "rare_ip",
+        "rare_domain",
+        "red_count",
+        "listed_count",
+        "unique_sha256",
+        "unique_ip",
+        "unique_domain",
+        "event_count_total",
+        "first_seen",
+        "last_seen",
+        "scoring_rare_computer_threshold",
+        "scoring_weight_rare_unknown_hash",
+        "scoring_weight_rare_sha256",
+        "scoring_weight_rare_ip",
+        "scoring_weight_rare_domain",
+        "scoring_weight_listed",
+        "scoring_weight_red",
+    ]
+
+    export_rows = [
+        {k: safe_export_value(row.get(k)) for k in fieldnames}
+        for row in rows
+    ]
+
+    now_stamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return csv_response(
+        f"greycode-computers-{now_stamp}.csv",
+        fieldnames,
+        export_rows,
     )
 
 @app.get("/ui/computer/{computer}/drawer", response_class=HTMLResponse)
@@ -6665,6 +6740,139 @@ async def ui_sysmon_spread_modal(
             **vm,
         },
     )
+
+@app.get("/ui/sysmon/{event_id}/export.csv")
+async def ui_sysmon_export_csv(
+    request: Request,
+    event_id: int = ApiPath(..., ge=1),
+    status: str = Query("ALL"),
+    q: str = Query(""),
+    sort: str = Query("last_seen"),
+    order: str = Query("desc"),
+    triage: str = Query("ALL"),
+    listing_state: str = Query("ALL"),
+    tag: str = Query("ALL"),
+    _auth=Depends(require_login),
+):
+    tab = int(event_id)
+
+    if tab == 1:
+        indicator_label = "SHA256"
+        indicator_field = "sha256"
+        kind = "sha256"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY", "GREEN"}
+        fieldnames = [
+            "sha256",
+            "status",
+            "vt_state",
+            "vt_malicious",
+            "disposition",
+            "ticket_id",
+            "count_total",
+            "org_computer_count",
+            "first_seen",
+            "last_seen",
+            "computer",
+            "image",
+            "source",
+            "tags",
+            "has_comment",
+        ]
+    elif tab == 3:
+        indicator_label = "DestinationIp"
+        indicator_field = "ip"
+        kind = "ip"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+        fieldnames = [
+            "ip",
+            "status",
+            "listing_state",
+            "disposition",
+            "ticket_id",
+            "count_total",
+            "org_computer_count",
+            "first_seen",
+            "last_seen",
+            "computer_first",
+            "computer_last",
+            "source",
+            "geo_asn",
+            "geo_as_org",
+            "geo_country_iso",
+            "geo_country_name",
+            "geo_city",
+            "geo_source",
+            "geo_last_checked",
+            "tags",
+            "has_comment",
+        ]
+    elif tab == 22:
+        indicator_label = "QueryName"
+        indicator_field = "domain"
+        kind = "domain"
+        allowed_status = {"ALL", "RED", "ERROR", "GREY"}
+        fieldnames = [
+            "domain",
+            "status",
+            "listing_state",
+            "disposition",
+            "ticket_id",
+            "count_total",
+            "org_computer_count",
+            "first_seen",
+            "last_seen",
+            "computer_first",
+            "computer_last",
+            "source",
+            "akarank_top1m",
+            "akarank_domain",
+            "akarank_rank",
+            "tags",
+            "has_comment",
+        ]
+    else:
+        raise HTTPException(status_code=404, detail="Unknown Sysmon tab")
+
+    status = (status or "ALL").upper()
+    if status not in allowed_status:
+        status = "ALL"
+
+    indexed_sorts = {"last_seen", "count_total", "rare"}
+    if sort not in indexed_sorts:
+        sort = "last_seen"
+
+    rows, total = await fetch_indexed_page(
+        tab=tab,
+        kind=kind,
+        indicator_field=indicator_field,
+        status=status,
+        triage=triage,
+        listing_state=listing_state,
+        q=q,
+        sort=sort,
+        order=order,
+        page=1,
+        page_size=EXPORT_MAX_ROWS,
+        tag=tag,
+    )
+
+    export_rows: list[dict[str, Any]] = []
+    for row in rows:
+        out = {k: safe_export_value(row.get(k)) for k in fieldnames}
+
+        # Add org computer count if not already part of build_row_from_data().
+        indicator = row.get(indicator_field) or ""
+        if indicator and "org_computer_count" in fieldnames and not out.get("org_computer_count"):
+            out["org_computer_count"] = safe_export_value(
+                await r.scard(seen_by_computers_key(kind, indicator))
+            )
+
+        export_rows.append(out)
+
+    now_stamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename = f"greycode-sysmon-{tab}-{now_stamp}.csv"
+
+    return csv_response(filename, fieldnames, export_rows)
 
 @app.get("/ui/sysmon/{event_id}/row/{indicator}", response_class=HTMLResponse)
 async def ui_sysmon_row(

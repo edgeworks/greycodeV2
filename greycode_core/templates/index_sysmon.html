@@ -82,6 +82,11 @@
     <div class="actions" style="margin-top: 18px;">
       <button class="btn primary" type="submit">Apply</button>
 
+      <a class="btn"
+        href="/ui/sysmon/{{ tab }}/export.csv?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}">
+        Export CSV
+      </a>
+      
       {% if tab == 1 %}
         <a class="btn" href="/ui/sysmon/1?status=RED&triage=OPEN&sort=last_seen&order=desc&page_size={{ page_size }}">Open queue</a>
         <a class="btn" href="/ui/sysmon/1?sort=rare&order=asc&page_size={{ page_size }}">Rare first</a>
