@@ -120,14 +120,9 @@
     </div>
   </form>
 
-  <div id="tableSearchIndicator" class="htmx-indicator search-working">
-    Searching… this may take a while on large tables.
-  </div>
-
   <div id="tablewrap"
         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page={{ page }}&page_size={{ page_size }}"
-        hx-trigger="load"
-        hx-indicator="#tableSearchIndicator">
+        hx-trigger="load">
     <p class="muted">Loading…</p>
   </div>
 
@@ -188,6 +183,24 @@
 
       e.preventDefault();
       window.location.href = gcBuildSysmonExportUrl();
+    });
+  </script>
+
+  <script>
+    document.body.addEventListener("htmx:beforeRequest", function (e) {
+      if (e.target && (e.target.id === "filters" || e.target.id === "tablewrap")) {
+        document.body.classList.add("gc-busy");
+      }
+    });
+
+    document.body.addEventListener("htmx:afterRequest", function (e) {
+      if (e.target && (e.target.id === "filters" || e.target.id === "tablewrap")) {
+        document.body.classList.remove("gc-busy");
+      }
+    });
+
+    document.body.addEventListener("htmx:responseError", function () {
+      document.body.classList.remove("gc-busy");
     });
   </script>
 {% endblock %}

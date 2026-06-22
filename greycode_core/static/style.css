@@ -1074,20 +1074,58 @@ input[type="checkbox"] {
 
 /* ---------- Search Indicator---------- */
 
-.search-working {
+.gc-busy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
   display: none;
-  margin: 10px 0 14px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--warning-soft);
-  color: var(--text);
-  font-weight: 700;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 96px;
+  background: color-mix(in srgb, var(--overlay) 55%, transparent);
+  backdrop-filter: blur(5px);
+  pointer-events: none;
 }
 
-.htmx-request.search-working,
-.htmx-request .search-working {
-  display: block;
+body.gc-busy .gc-busy-overlay {
+  display: flex;
+}
+
+.gc-busy-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.gc-busy-title {
+  font-weight: 850;
+  color: var(--text);
+  margin-bottom: 3px;
+}
+
+.gc-busy-text {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.gc-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid var(--border);
+  border-top-color: var(--warning);
+  animation: gcSpin 800ms linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes gcSpin {
+  to { transform: rotate(360deg); }
 }
 
 
