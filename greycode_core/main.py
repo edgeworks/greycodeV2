@@ -2106,6 +2106,8 @@ async def fetch_indexed_page(
             break
 
         if q_lower:
+            target_matches = page_start + page_size + 1  # one extra to know if "Next" exists
+
             pipe = r.pipeline()
             for m in members:
                 for fk in filter_keys:
@@ -2132,12 +2134,14 @@ async def fetch_indexed_page(
                     continue
 
                 total += 1
+
                 if total > page_start and len(rows) < page_size:
                     rows.append(row)
 
-            if len(rows) >= page_size and total > page_start:
-                # keep scanning for exact total only when searching
-                continue
+                # Stop once we found enough for this page plus one extra.
+                # This avoids scanning 100k+ rows just to calculate an exact total.
+                if total >= target_matches:
+                    return rows, total
 
         else:
             pipe = r.pipeline()
