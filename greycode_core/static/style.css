@@ -1072,6 +1072,25 @@ input[type="checkbox"] {
   background: var(--border);
 }
 
+/* ---------- Search Indicator---------- */
+
+.search-working {
+  display: none;
+  margin: 10px 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--warning-soft);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.htmx-request.search-working,
+.htmx-request .search-working {
+  display: block;
+}
+
+
 /* ---------- Drawer ---------- */
 
 .drawer-backdrop {

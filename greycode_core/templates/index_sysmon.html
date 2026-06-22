@@ -9,7 +9,8 @@
         class="controls"
         hx-get="/ui/sysmon/{{ tab }}/table"
         hx-target="#tablewrap"
-        hx-trigger="submit">
+        hx-trigger="submit"
+        hx-indicator="#tableSearchIndicator">
 
     <label>Search
       <input type="text" name="q" value="{{ q }}"
@@ -46,6 +47,7 @@
         </select>
       </label>
     {% endif %}
+
     <label>Tag
       <select name="tag">
         <option value="ALL" {% if tag == "ALL" %}selected{% endif %}>ALL</option>
@@ -54,6 +56,7 @@
         {% endfor %}
       </select>
     </label>
+
     <label>Sort
       <select name="sort">
         <option value="last_seen" {% if sort == "last_seen" %}selected{% endif %}>Last seen</option>
@@ -117,9 +120,14 @@
     </div>
   </form>
 
+  <div id="tableSearchIndicator" class="htmx-indicator search-working">
+    Searching… this may take a while on large tables.
+  </div>
+
   <div id="tablewrap"
         hx-get="/ui/sysmon/{{ tab }}/table?status={{ status }}&triage={{ triage }}&listing_state={{ listing_state }}&tag={{ tag }}&q={{ q }}&sort={{ sort }}&order={{ order }}&page={{ page }}&page_size={{ page_size }}"
-        hx-trigger="load">
+        hx-trigger="load"
+        hx-indicator="#tableSearchIndicator">
     <p class="muted">Loading…</p>
   </div>
 
@@ -153,6 +161,7 @@
       }, { once: true });
     })();
   </script>
+
   <script>
     document.body.addEventListener("htmx:configRequest", function (e) {
       if (e.target && e.target.id === "filters") {
@@ -162,6 +171,7 @@
       }
     });
   </script>
+
   <script>
     function gcBuildSysmonExportUrl() {
       const form = document.getElementById("filters");
