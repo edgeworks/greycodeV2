@@ -141,6 +141,7 @@ GEOIP_DIR = Path(os.getenv("GREYCODE_GEOIP_DIR", "/app/data/geoip"))
 GEOIP_ASN_FILE = GEOIP_DIR / "GeoLite2-ASN.mmdb"
 GEOIP_CITY_FILE = GEOIP_DIR / "GeoLite2-City.mmdb"
 EXPORT_MAX_ROWS = 50000
+MAX_BULK_EVENTS = int(os.getenv("GREYCODE_MAX_BULK_EVENTS", "5000"))
 
 #DEBUG RELATED ------
 @app.middleware("http")
@@ -1339,6 +1340,46 @@ def computer_event_counter_for_kind(kind: str) -> str:
     if kind == "domain":
         return "event_count_sysmon22"
     raise ValueError(f"Unknown computer event kind: {kind}")
+
+def add_computer_observation(
+    aggregated: dict[tuple[str, str, str], dict[str, Any]],
+    *,
+    computer: str,
+    kind: str,
+    indicator: str,
+    count: int = 1,
+) -> None:
+    computer_norm = normalize_computer(computer)
+    indicator = (indicator or "").strip()
+
+    if not computer_norm or not kind or not indicator:
+        return
+
+    key = (computer_norm, kind, indicator)
+
+    row = aggregated.get(key)
+    if row is None:
+        aggregated[key] = {
+            "computer": computer_norm,
+            "kind": kind,
+            "indicator": indicator,
+            "count": int(count),
+        }
+    else:
+        row["count"] = int(row.get("count") or 0) + int(count)
+
+
+def computer_observation_values(
+    aggregated: dict[tuple[str, str, str], dict[str, Any]]
+) -> list[dict[str, Any]]:
+    return list(aggregated.values())
+
+def enforce_max_bulk_events(events: list[Any], *, kind: str) -> None:
+    if len(events) > MAX_BULK_EVENTS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Bulk request too large for {kind}: {len(events)} events, max {MAX_BULK_EVENTS}",
+        )
 
 
 async def update_computer_observations(
@@ -4525,10 +4566,17 @@ async def enrich_process(event: ProcessEvent):
 @app.post("/enrich/process/bulk")
 async def enrich_process_bulk(request: Request):
     """
+    Bulk Sysmon ID 1 ingest.
+
     Accept either:
       - application/x-ndjson (one JSON object per line)
       - application/json with a JSON array: [ {...}, {...} ]
-      - application/json with a single object (also accepted)
+      - application/json with a single object
+
+    Robustness:
+      - rejects over-large batches via GREYCODE_MAX_BULK_EVENTS
+      - aggregates per SHA256
+      - aggregates computer observations per (computer, sha256)
     """
     ctype = (request.headers.get("content-type") or "").lower()
     body_bytes = await request.body()
@@ -4537,7 +4585,7 @@ async def enrich_process_bulk(request: Request):
     if not body_text:
         raise HTTPException(status_code=400, detail="Empty request body")
 
-    events = []
+    events: list[Any] = []
 
     if "application/x-ndjson" in ctype:
         for line in body_text.splitlines():
@@ -4561,21 +4609,30 @@ async def enrich_process_bulk(request: Request):
         else:
             raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
 
+    enforce_max_bulk_events(events, kind="process")
+
     filtered = 0
     accepted = 0
     rejected = 0
-    errors = []
+    errors: list[dict[str, Any]] = []
     start_perf = time.perf_counter()
     new_count = 0
     existing_count = 0
     index_sync_count = 0
 
     vt_enabled = await vt_enabled_setting()
-
-    aggregated: dict[str, dict[str, Any]] = {}
-    computer_observations: list[dict[str, Any]] = []
-
     manual_filters = await load_manual_filters()
+
+    # Shape:
+    # {
+    #   sha256: {
+    #     "count": int,
+    #     "computer": last_seen_computer,
+    #     "image": last_seen_image,
+    #     "computers": {computer_norm: count}
+    #   }
+    # }
+    aggregated: dict[str, dict[str, Any]] = {}
 
     for idx, obj in enumerate(events):
         try:
@@ -4585,30 +4642,47 @@ async def enrich_process_bulk(request: Request):
             errors.append({"index": idx, "error": e.errors()})
             continue
 
+        sha256_value = (event.sha256 or "").strip().upper()
+        computer_norm = normalize_computer(event.computer)
+
+        if not sha256_value:
+            rejected += 1
+            errors.append({"index": idx, "error": "Invalid sha256"})
+            continue
+
         if value_matches_any_manual_filter(manual_filters, "image", event.image):
             filtered += 1
             continue
 
         accepted += 1
 
-        computer_observations.append({
-            "computer": event.computer,
-            "kind": "sha256",
-            "indicator": event.sha256,
-            "count": 1,
-        })
-
-        row = aggregated.get(event.sha256)
+        row = aggregated.get(sha256_value)
         if row is None:
-            aggregated[event.sha256] = {
+            aggregated[sha256_value] = {
                 "count": 1,
                 "computer": event.computer,
                 "image": event.image,
+                "computers": {computer_norm: 1} if computer_norm else {},
             }
         else:
-            row["count"] += 1
+            row["count"] = int(row.get("count") or 0) + 1
             row["computer"] = event.computer
             row["image"] = event.image
+            if computer_norm:
+                computers = row.setdefault("computers", {})
+                computers[computer_norm] = int(computers.get(computer_norm) or 0) + 1
+
+    computer_observations: list[dict[str, Any]] = []
+    for sha256_value, agg in aggregated.items():
+        for computer_norm, count in (agg.get("computers") or {}).items():
+            computer_observations.append(
+                {
+                    "computer": computer_norm,
+                    "kind": "sha256",
+                    "indicator": sha256_value,
+                    "count": int(count),
+                }
+            )
 
     if not aggregated:
         logger.warning(
@@ -4634,13 +4708,12 @@ async def enrich_process_bulk(request: Request):
             }
         )
 
-    now = datetime.datetime.utcnow().isoformat()
+    now = utcnow_iso()
     hashes = list(aggregated.keys())
 
     pipe = r.pipeline()
     for sha256_value in hashes:
-        key = f"greycode:sha256:{sha256_value}"
-        pipe.exists(key)
+        pipe.exists(f"greycode:sha256:{sha256_value}")
     exists_raw = await pipe.execute()
 
     exists_by_hash = {
@@ -4662,7 +4735,14 @@ async def enrich_process_bulk(request: Request):
             index_sync_count += 1
 
             pipe.hincrby(key, "count_total", count)
-            pipe.hset(key, mapping={"last_seen": now})
+            pipe.hset(
+                key,
+                mapping={
+                    "last_seen": now,
+                    "computer": computer,
+                    "image": image,
+                },
+            )
             pipe.sadd(INDEX_DIRTY_SHA256_SET, sha256_value)
 
         else:
@@ -4691,7 +4771,6 @@ async def enrich_process_bulk(request: Request):
                 pipe.lpush(VT_QUEUE, sha256_value)
 
     await pipe.execute()
-
     await update_computer_observations(computer_observations, seen_at=now)
 
     logger.warning(
@@ -4717,6 +4796,7 @@ async def enrich_process_bulk(request: Request):
             "computer_observations": len(computer_observations),
         }
     )
+
 
 @app.post("/enrich/network")
 async def enrich_network(event: NetworkEvent):
@@ -4837,13 +4917,16 @@ async def enrich_network(event: NetworkEvent):
 async def enrich_network_bulk(request: Request):
     """
     Bulk Sysmon ID 3 ingest.
+
     Accept either:
       - application/x-ndjson (one JSON object per line)
       - application/json with a JSON array: [ {...}, {...} ]
       - application/json with a single object
-    Expected fields per event (Cribl style):
-      - Computer
-      - DestinationIp
+
+    Robustness:
+      - rejects over-large batches via GREYCODE_MAX_BULK_EVENTS
+      - aggregates per normalized IP
+      - aggregates computer observations per (computer, ip)
     """
     ctype = (request.headers.get("content-type") or "").lower()
     body_bytes = await request.body()
@@ -4852,7 +4935,8 @@ async def enrich_network_bulk(request: Request):
     if not body_text:
         raise HTTPException(status_code=400, detail="Empty request body")
 
-    events = []
+    events: list[Any] = []
+
     if "application/x-ndjson" in ctype:
         for line in body_text.splitlines():
             line = line.strip()
@@ -4867,6 +4951,7 @@ async def enrich_network_bulk(request: Request):
             parsed = json.loads(body_text)
         except json.JSONDecodeError as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
         if isinstance(parsed, list):
             events = parsed
         elif isinstance(parsed, dict):
@@ -4874,18 +4959,29 @@ async def enrich_network_bulk(request: Request):
         else:
             raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
 
+    enforce_max_bulk_events(events, kind="network")
+
     accepted = 0
     rejected = 0
-    errors = []
+    errors: list[dict[str, Any]] = []
     start_perf = time.perf_counter()
     new_count = 0
     existing_count = 0
     index_sync_count = 0
     filtered = 0
+
     manual_filters = await load_manual_filters()
 
+    # Shape:
+    # {
+    #   ip: {
+    #     "count": int,
+    #     "computer_first": first_seen_computer,
+    #     "computer_last": last_seen_computer,
+    #     "computers": {computer_norm: count}
+    #   }
+    # }
     aggregated: dict[str, dict[str, Any]] = {}
-    computer_observations: list[dict[str, Any]] = []
 
     for idx, obj in enumerate(events):
         try:
@@ -4907,13 +5003,7 @@ async def enrich_network_bulk(request: Request):
             continue
 
         accepted += 1
-
-        computer_observations.append({
-            "computer": event.Computer,
-            "kind": "ip",
-            "indicator": ip_norm,
-            "count": 1,
-        })
+        computer_norm = normalize_computer(event.Computer)
 
         row = aggregated.get(ip_norm)
         if row is None:
@@ -4921,10 +5011,26 @@ async def enrich_network_bulk(request: Request):
                 "count": 1,
                 "computer_first": event.Computer,
                 "computer_last": event.Computer,
+                "computers": {computer_norm: 1} if computer_norm else {},
             }
         else:
-            row["count"] += 1
+            row["count"] = int(row.get("count") or 0) + 1
             row["computer_last"] = event.Computer
+            if computer_norm:
+                computers = row.setdefault("computers", {})
+                computers[computer_norm] = int(computers.get(computer_norm) or 0) + 1
+
+    computer_observations: list[dict[str, Any]] = []
+    for ip_norm, agg in aggregated.items():
+        for computer_norm, count in (agg.get("computers") or {}).items():
+            computer_observations.append(
+                {
+                    "computer": computer_norm,
+                    "kind": "ip",
+                    "indicator": ip_norm,
+                    "count": int(count),
+                }
+            )
 
     if not aggregated:
         logger.warning(
@@ -5010,6 +5116,7 @@ async def enrich_network_bulk(request: Request):
                 index_sync_count += 1
                 pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
                 pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
         else:
             new_count += count
             index_sync_count += 1
@@ -5036,11 +5143,10 @@ async def enrich_network_bulk(request: Request):
             pipe.sadd(INDEX_DIRTY_IP_SET, ip_norm)
 
     await pipe.execute()
-
     await update_computer_observations(computer_observations, seen_at=now)
 
     logger.warning(
-        "bulk kind=network received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
+        "bulk kind=network received=%d accepted=%d rejected=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d geoip=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
@@ -5049,6 +5155,7 @@ async def enrich_network_bulk(request: Request):
         existing_count,
         index_sync_count,
         len(computer_observations),
+        sum(1 for v in geoip_by_ip.values() if v),
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -5063,6 +5170,7 @@ async def enrich_network_bulk(request: Request):
             "geoip_enriched": sum(1 for v in geoip_by_ip.values() if v),
         }
     )
+
 
 @app.post("/enrich/dns")
 async def enrich_dns(event: DnsEvent):
@@ -5191,13 +5299,16 @@ async def enrich_dns(event: DnsEvent):
 async def enrich_dns_bulk(request: Request):
     """
     Bulk Sysmon ID 22 ingest.
+
     Accept either:
       - application/x-ndjson (one JSON object per line)
       - application/json with a JSON array: [ {...}, {...} ]
       - application/json with a single object
-    Expected fields per event:
-      - Computer
-      - QueryName
+
+    Robustness:
+      - rejects over-large batches via GREYCODE_MAX_BULK_EVENTS
+      - aggregates per normalized domain
+      - aggregates computer observations per (computer, domain)
     """
     ctype = (request.headers.get("content-type") or "").lower()
     body_bytes = await request.body()
@@ -5206,7 +5317,8 @@ async def enrich_dns_bulk(request: Request):
     if not body_text:
         raise HTTPException(status_code=400, detail="Empty request body")
 
-    events = []
+    events: list[Any] = []
+
     if "application/x-ndjson" in ctype:
         for line in body_text.splitlines():
             line = line.strip()
@@ -5229,9 +5341,11 @@ async def enrich_dns_bulk(request: Request):
         else:
             raise HTTPException(status_code=400, detail="JSON must be an object or an array of objects")
 
+    enforce_max_bulk_events(events, kind="dns")
+
     accepted = 0
     rejected = 0
-    errors = []
+    errors: list[dict[str, Any]] = []
     start_perf = time.perf_counter()
     new_count = 0
     existing_count = 0
@@ -5239,10 +5353,19 @@ async def enrich_dns_bulk(request: Request):
     filtered = 0
     filtered_single_label = 0
     filtered_manual = 0
+
     manual_filters = await load_manual_filters()
 
+    # Shape:
+    # {
+    #   domain: {
+    #     "count": int,
+    #     "computer_first": first_seen_computer,
+    #     "computer_last": last_seen_computer,
+    #     "computers": {computer_norm: count}
+    #   }
+    # }
     aggregated: dict[str, dict[str, Any]] = {}
-    computer_observations: list[dict[str, Any]] = []
 
     for idx, obj in enumerate(events):
         try:
@@ -5268,13 +5391,7 @@ async def enrich_dns_bulk(request: Request):
             continue
 
         accepted += 1
-
-        computer_observations.append({
-            "computer": event.Computer,
-            "kind": "domain",
-            "indicator": domain_norm,
-            "count": 1,
-        })
+        computer_norm = normalize_computer(event.Computer)
 
         row = aggregated.get(domain_norm)
         if row is None:
@@ -5282,10 +5399,26 @@ async def enrich_dns_bulk(request: Request):
                 "count": 1,
                 "computer_first": event.Computer,
                 "computer_last": event.Computer,
+                "computers": {computer_norm: 1} if computer_norm else {},
             }
         else:
-            row["count"] += 1
+            row["count"] = int(row.get("count") or 0) + 1
             row["computer_last"] = event.Computer
+            if computer_norm:
+                computers = row.setdefault("computers", {})
+                computers[computer_norm] = int(computers.get(computer_norm) or 0) + 1
+
+    computer_observations: list[dict[str, Any]] = []
+    for domain_norm, agg in aggregated.items():
+        for computer_norm, count in (agg.get("computers") or {}).items():
+            computer_observations.append(
+                {
+                    "computer": computer_norm,
+                    "kind": "domain",
+                    "indicator": domain_norm,
+                    "count": int(count),
+                }
+            )
 
     if not aggregated:
         logger.warning(
@@ -5385,6 +5518,7 @@ async def enrich_dns_bulk(request: Request):
                 index_sync_count += 1
                 pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
                 pipe.hset(key, mapping={"index_last_sync": str(now_epoch)})
+
         else:
             new_count += count
             index_sync_count += 1
@@ -5411,11 +5545,10 @@ async def enrich_dns_bulk(request: Request):
             pipe.sadd(INDEX_DIRTY_DOMAIN_SET, domain_norm)
 
     await pipe.execute()
-
     await update_computer_observations(computer_observations, seen_at=now)
 
     logger.warning(
-        "bulk kind=dns received=%d accepted=%d rejected=%d filtered=%d single_label=%d manual=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d dur_ms=%.1f",
+        "bulk kind=dns received=%d accepted=%d rejected=%d filtered=%d single_label=%d manual=%d unique=%d new=%d existing=%d index_sync=%d computer_obs=%d top1m=%d dur_ms=%.1f",
         len(events),
         accepted,
         rejected,
@@ -5427,6 +5560,7 @@ async def enrich_dns_bulk(request: Request):
         existing_count,
         index_sync_count,
         len(computer_observations),
+        sum(1 for v in akarank_by_domain.values() if v.get("akarank_top1m") == "1"),
         (time.perf_counter() - start_perf) * 1000,
     )
 
@@ -5440,8 +5574,10 @@ async def enrich_dns_bulk(request: Request):
             "filtered_single_label": filtered_single_label,
             "filtered_manual": filtered_manual,
             "computer_observations": len(computer_observations),
+            "akarank_top1m": sum(1 for v in akarank_by_domain.values() if v.get("akarank_top1m") == "1"),
         }
     )
+
 
 @app.post("/ui/hash/{sha256}/accept")
 async def ui_hash_accept(sha256: str, request: Request, _auth=Depends(require_login)):
