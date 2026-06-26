@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 import os
 import base64
 import hashlib
+from urllib.parse import quote
 from cryptography.fernet import Fernet, InvalidToken
 import httpx
 
@@ -91,6 +92,13 @@ def normalize_domain(qname: str) -> str:
 
 def normalize_ip(ip: str) -> str:
     return str(ipaddress.ip_address((ip or "").strip()))
+
+
+def _domain_ui_link(domain: str) -> str | None:
+    ui_base = os.getenv("GREYCODE_UI_BASE_URL", "").rstrip("/")
+    if not ui_base:
+        return None
+    return f"{ui_base}/ui/sysmon/22?open={quote(domain, safe='')}"
 
 
 def split_ip_port(value: str) -> tuple[str, str]:
@@ -678,6 +686,7 @@ async def update_indicator_record(
                     vendors_added=vendors_added,
                     vendors_removed=vendors_removed,
                     source="blacklist",
+                    ui_link=_domain_ui_link(ind) if indicator_type == "domain" else None,
                 )
                 print(f"[alert-debug] sending LISTED alert for {ind}", flush=True) #debug alert issue
                 await alert_router.send(alert)
